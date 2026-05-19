@@ -1,5 +1,4 @@
 import {
-  Fragment,
   useCallback,
   useDeferredValue,
   useEffect,
@@ -14,17 +13,11 @@ import type { TFunction } from 'i18next';
 import { Input } from '@/components/ui/Input';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { Select } from '@/components/ui/Select';
-import { DropdownMenu, type DropdownMenuItem } from '@/components/ui/DropdownMenu';
 import {
-  IconChevronDown,
-  IconChevronUp,
   IconChartLine,
-  IconCrosshair,
   IconDownload,
   IconExternalLink,
   IconFileText,
-  IconInfo,
-  IconMoreVertical,
   IconRefreshCw,
   IconSearch,
   IconSettings,
@@ -58,7 +51,6 @@ import {
   writeAccountOverviewUiState,
   type AccountOverviewPageResetState,
   type AccountSortKey,
-  type MonitoringAccountAuthState,
   type AccountSortState,
   type MonitoringAccountOverviewMode,
 } from '@/features/monitoring/accountOverviewState';
@@ -69,23 +61,18 @@ import {
 import {
   AccountExpandedDetails,
   AccountOverviewCard,
-  AccountStatusBadge,
-  AccountSummaryPrimary,
 } from '@/features/monitoring/components/AccountOverviewCard';
+import { AccountOverviewPanel } from '@/features/monitoring/components/AccountOverviewPanel';
 import { ApiKeySummaryPanel } from '@/features/monitoring/components/ApiKeySummaryPanel';
 import { MonitoringCustomRangeModal } from '@/features/monitoring/components/MonitoringCustomRangeModal';
 import { MonitoringPriceModal } from '@/features/monitoring/components/MonitoringPriceModal';
 import { RealtimeEventsPanel } from '@/features/monitoring/components/RealtimeEventsPanel';
 import {
-  PaginationControls,
   SummaryCard,
   type SummaryCardProps,
 } from '@/features/monitoring/components/MonitoringShared';
 import {
-  buildAccountSummaryMetrics,
   formatPercent,
-  getAccountStatusTone,
-  getSuccessRateClassName,
   type AccountQuotaEntry,
   type AccountQuotaState,
   type AccountQuotaWindow,
@@ -365,11 +352,7 @@ const formatAccountOverviewScopeText = (
   return t('monitoring.account_overview_scope_range', { range: rangeLabel });
 };
 
-const EMPTY_ACCOUNT_AUTH_STATE: MonitoringAccountAuthState = {
-  files: [],
-  toggleableFileNames: [],
-  enabledState: 'unavailable',
-};export function MonitoringCenterPage() {
+export function MonitoringCenterPage() {
   const { t, i18n } = useTranslation();
   const config = useConfigStore((state) => state.config);
   const connectionStatus = useAuthStore((state) => state.connectionStatus);
@@ -1741,312 +1724,41 @@ const EMPTY_ACCOUNT_AUTH_STATE: MonitoringAccountAuthState = {
         </div>
       </section>
 
-      <MonitoringPanel
-        title={
-          <span className={styles.panelTitleWithHint}>
-            {t('monitoring.account_overview_title')}
-            <span title={t('monitoring.account_overview_description')}>
-              <IconInfo
-                size={14}
-                className={styles.panelTitleHintIcon}
-                aria-label={t('monitoring.account_overview_description')}
-              />
-            </span>
-          </span>
-        }
-        className={styles.accountPanel}
-        extra={
-          <div className={styles.accountOverviewHeaderActions}>
-            <div className={styles.accountOverviewToolbarRow}>
-              <div className={styles.accountOverviewSearchWrap}>
-                <Input
-                  value={searchInput}
-                  onChange={(event) => setSearchInput(event.target.value)}
-                  placeholder={t('monitoring.account_overview_search_placeholder')}
-                  className={styles.accountOverviewSearchInput}
-                  rightElement={<IconSearch size={16} />}
-                  aria-label={t('monitoring.account_overview_search_placeholder')}
-                />
-              </div>
-              <button
-                type="button"
-                className={styles.accountOverviewToolButton}
-                onClick={() => void refreshAll()}
-                disabled={overallLoading}
-              >
-                <IconRefreshCw
-                  size={15}
-                  className={overallLoading ? styles.refreshIconSpinning : styles.refreshIcon}
-                />
-                <span>{t('common.refresh')}</span>
-              </button>
-              <div className={styles.accountOverviewSortBar}>
-                <Select
-                  className={styles.accountOverviewSortSelect}
-                  triggerClassName={styles.accountOverviewSortSelectTrigger}
-                  value={accountSort.key}
-                  options={accountSortOptions}
-                  onChange={(value) => handleAccountSortKeyChange(value as AccountSortKey)}
-                  ariaLabel={t('monitoring.account_overview_sort_label')}
-                  fullWidth={false}
-                />
-              </div>
-
-              <div className={`${styles.segmentedControl} ${styles.accountOverviewModeToggle}`}>
-                <button
-                  type="button"
-                  className={`${styles.segmentButton} ${accountOverviewMode === 'table' ? styles.segmentButtonActive : ''}`}
-                  onClick={() => setAccountOverviewMode('table')}
-                >
-                  {t('monitoring.account_overview_view_mode_table')}
-                </button>
-                <button
-                  type="button"
-                  className={`${styles.segmentButton} ${accountOverviewMode === 'card' ? styles.segmentButtonActive : ''}`}
-                  onClick={() => setAccountOverviewMode('card')}
-                >
-                  {t('monitoring.account_overview_view_mode_card')}
-                </button>
-              </div>
-            </div>
-          </div>
-        }
-      >
-        {accountOverviewMode === 'table' ? (
-          <div className={`${styles.tableWrapper} ${styles.accountOverviewTableWrapper}`}>
-            <table className={`${styles.table} ${styles.accountOverviewTable}`}>
-              <colgroup>
-                {accountOverviewColumns.map((column) => (
-                  <col key={column.key} />
-                ))}
-              </colgroup>
-              <thead>
-                <tr>
-                  {accountOverviewColumns.map((column) => {
-                    const sortKey = column.sortKey;
-
-                    if (!sortKey) {
-                      return <th key={column.key}>{column.label}</th>;
-                    }
-
-                    const isActive = accountSort.key === sortKey;
-                    const SortIcon = isActive
-                      ? accountSort.direction === 'desc'
-                        ? IconChevronDown
-                        : IconChevronUp
-                      : null;
-
-                    return (
-                      <th
-                        key={column.key}
-                        aria-sort={
-                          isActive
-                            ? accountSort.direction === 'desc'
-                              ? 'descending'
-                              : 'ascending'
-                            : 'none'
-                        }
-                      >
-                        <button
-                          type="button"
-                          className={[
-                            styles.sortableHeaderButton,
-                            isActive ? styles.sortableHeaderButtonActive : '',
-                          ]
-                            .filter(Boolean)
-                            .join(' ')}
-                          onClick={() => handleAccountSort(sortKey)}
-                        >
-                          <span>{column.label}</span>
-                          <span className={styles.sortIndicator} aria-hidden="true">
-                            {SortIcon ? <SortIcon size={14} /> : null}
-                          </span>
-                        </button>
-                      </th>
-                    );
-                  })}
-                </tr>
-              </thead>
-              <tbody>
-                {accountPagination.pageItems.map((row) => {
-                  const isExpanded = Boolean(expandedAccounts[row.id]);
-                  const isFocused = focusedAccount === row.account;
-                  const authState = accountAuthStateByRowId.get(row.id) ?? EMPTY_ACCOUNT_AUTH_STATE;
-                  const statusTone = getAccountStatusTone(authState);
-                  const summaryMetrics = buildAccountSummaryMetrics(
-                    row,
-                    hasPrices,
-                    i18n.language,
-                    t
-                  );
-                  const metricByKey = new Map(summaryMetrics.map((metric) => [metric.key, metric]));
-                  const rowClassName = [
-                    styles.accountSummaryRow,
-                    isFocused ? styles.focusedRow : '',
-                    isExpanded ? styles.accountOverviewRowExpanded : '',
-                    authState.enabledState === 'disabled' ? styles.accountOverviewRowDisabled : '',
-                  ]
-                    .filter(Boolean)
-                    .join(' ');
-                  const accountMenuItems: DropdownMenuItem[] = [];
-                  if (authState.enabledState === 'enabled') {
-                    accountMenuItems.push({
-                      key: 'disable',
-                      label: t('monitoring.account_overview_row_menu_disable'),
-                      onClick: () => void handleAccountStatusToggle(row, false),
-                      disabled: accountStatusUpdating[row.id] === true,
-                      tone: 'danger',
-                    });
-                  } else if (authState.enabledState === 'disabled') {
-                    accountMenuItems.push({
-                      key: 'enable',
-                      label: t('monitoring.account_overview_row_menu_enable'),
-                      onClick: () => void handleAccountStatusToggle(row, true),
-                      disabled: accountStatusUpdating[row.id] === true,
-                    });
-                  } else if (authState.enabledState === 'mixed') {
-                    accountMenuItems.push(
-                      {
-                        key: 'enable-all',
-                        label: t('monitoring.account_overview_row_menu_enable_all'),
-                        onClick: () => void handleAccountStatusToggle(row, true),
-                        disabled: accountStatusUpdating[row.id] === true,
-                      },
-                      {
-                        key: 'disable-all',
-                        label: t('monitoring.account_overview_row_menu_disable_all'),
-                        onClick: () => void handleAccountStatusToggle(row, false),
-                        disabled: accountStatusUpdating[row.id] === true,
-                        tone: 'danger',
-                      }
-                    );
-                  }
-                  accountMenuItems.push({
-                    key: 'refresh-quota',
-                    label: t('monitoring.account_overview_row_menu_refresh_quota'),
-                    onClick: () => void loadAccountQuota(row.account, true),
-                  });
-
-                  return (
-                    <Fragment key={row.id}>
-                      <tr className={rowClassName || undefined}>
-                        <td>
-                          <AccountSummaryPrimary
-                            row={row}
-                            expanded={isExpanded}
-                            onToggle={() => toggleAccountExpanded(row.id, row.account)}
-                            statusTone={statusTone}
-                          />
-                        </td>
-                        <td>
-                          <AccountStatusBadge authState={authState} t={t} />
-                        </td>
-                        <td>{metricByKey.get('total-calls')?.value ?? '--'}</td>
-                        <td className={metricByKey.get('success-calls')?.valueClassName}>
-                          {metricByKey.get('success-calls')?.value ?? '--'}
-                        </td>
-                        <td className={metricByKey.get('failure-calls')?.valueClassName}>
-                          {metricByKey.get('failure-calls')?.value ?? '--'}
-                        </td>
-                        <td className={getSuccessRateClassName(row.successRate)}>
-                          {formatPercent(row.successRate)}
-                        </td>
-                        <td>{metricByKey.get('total-tokens')?.value ?? '--'}</td>
-                        <td>{metricByKey.get('estimated-cost')?.value ?? '--'}</td>
-                        <td>{metricByKey.get('latest-request-time')?.value ?? '--'}</td>
-                        <td>
-                          <div className={styles.accountActionGroup}>
-                            <button
-                              type="button"
-                              className={styles.inlineActionButton}
-                              onClick={() => focusAccount(row.account)}
-                            >
-                              <IconCrosshair size={13} aria-hidden="true" />
-                              <span>
-                                {isFocused
-                                  ? t('monitoring.restore_account_scope')
-                                  : t('monitoring.focus_account')}
-                              </span>
-                            </button>
-                            <DropdownMenu
-                              ariaLabel={t('monitoring.account_overview_row_menu_label')}
-                              triggerClassName={styles.accountRowMenuButton}
-                              triggerIcon={<IconMoreVertical size={15} aria-hidden="true" />}
-                              items={accountMenuItems}
-                            />
-                          </div>
-                        </td>
-                      </tr>
-                      {isExpanded ? (
-                        <tr className={styles.accountDetailRow}>
-                          <td colSpan={accountOverviewColumns.length}>
-                            <AccountExpandedDetails
-                              row={row}
-                              hasPrices={hasPrices}
-                              locale={i18n.language}
-                              t={t}
-                              summaryMetrics={summaryMetrics}
-                              quotaState={accountQuotaStates[row.account]}
-                              onRefreshQuota={() => void loadAccountQuota(row.account, true)}
-                              variant="table"
-                            />
-                          </td>
-                        </tr>
-                      ) : null}
-                    </Fragment>
-                  );
-                })}
-                {sortedAccountRows.length === 0 ? (
-                  <tr>
-                    <td colSpan={accountOverviewColumns.length}>{renderMonitoringEmptyState()}</td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
-          </div>
-        ) : sortedAccountRows.length > 0 ? (
-          <div className={styles.accountOverviewCardGrid}>
-            {accountPagination.pageItems.map((row) => {
-              const authState = accountAuthStateByRowId.get(row.id) ?? EMPTY_ACCOUNT_AUTH_STATE;
-
-              return (
-                <AccountOverviewCard
-                  key={row.id}
-                  row={row}
-                  authState={authState}
-                  hasPrices={hasPrices}
-                  locale={i18n.language}
-                  t={t}
-                  isExpanded={Boolean(expandedAccounts[row.id])}
-                  isFocused={focusedAccount === row.account}
-                  statusData={accountStatusDataByRowId.get(row.id) ?? emptyAccountStatusData}
-                  scopeText={accountOverviewScopeText}
-                  quotaState={accountQuotaStates[row.account]}
-                  statusUpdating={accountStatusUpdating[row.id] === true}
-                  onToggle={() => toggleAccountExpanded(row.id, row.account)}
-                  onFocus={() => focusAccount(row.account)}
-                  onToggleEnabled={(enabled) => void handleAccountStatusToggle(row, enabled)}
-                  onRefreshQuota={() => void loadAccountQuota(row.account, true)}
-                />
-              );
-            })}
-          </div>
-        ) : (
-          renderMonitoringEmptyState()
-        )}
-        <PaginationControls
-          count={sortedAccountRows.length}
-          currentPage={accountPagination.currentPage}
-          totalPages={accountPagination.totalPages}
-          startItem={accountPagination.startItem}
-          endItem={accountPagination.endItem}
-          pageSize={accountPageSize}
-          pageSizeOptions={accountPageSizeOptions}
-          onPageChange={handleAccountPageChange}
-          onPageSizeChange={handleAccountPageSizeChange}
-          t={t}
-        />
-      </MonitoringPanel>
+      <AccountOverviewPanel
+        mode={accountOverviewMode}
+        searchInput={searchInput}
+        columns={accountOverviewColumns}
+        rows={sortedAccountRows}
+        pagination={accountPagination}
+        accountSort={accountSort}
+        accountSortOptions={accountSortOptions}
+        expandedAccounts={expandedAccounts}
+        focusedAccount={focusedAccount}
+        accountAuthStateByRowId={accountAuthStateByRowId}
+        accountStatusDataByRowId={accountStatusDataByRowId}
+        emptyAccountStatusData={emptyAccountStatusData}
+        accountQuotaStates={accountQuotaStates}
+        accountStatusUpdating={accountStatusUpdating}
+        accountPageSize={accountPageSize}
+        accountPageSizeOptions={accountPageSizeOptions}
+        accountOverviewScopeText={accountOverviewScopeText}
+        hasPrices={hasPrices}
+        overallLoading={overallLoading}
+        locale={i18n.language}
+        emptyState={renderMonitoringEmptyState()}
+        t={t}
+        onSearchChange={setSearchInput}
+        onRefreshAll={refreshAll}
+        onAccountSortKeyChange={handleAccountSortKeyChange}
+        onModeChange={setAccountOverviewMode}
+        onAccountSort={handleAccountSort}
+        onAccountStatusToggle={handleAccountStatusToggle}
+        onLoadAccountQuota={loadAccountQuota}
+        onToggleExpanded={toggleAccountExpanded}
+        onFocusAccount={focusAccount}
+        onPageChange={handleAccountPageChange}
+        onPageSizeChange={handleAccountPageSizeChange}
+      />
 
       <ApiKeySummaryPanel
         rows={apiKeyRows}
