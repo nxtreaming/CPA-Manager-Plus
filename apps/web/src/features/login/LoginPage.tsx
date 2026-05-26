@@ -43,6 +43,7 @@ import styles from './LoginPage.module.scss';
 
 type RedirectState = { from?: { pathname?: string } };
 type UsageSetupStep = 'admin' | 'connection' | 'cpaKey' | 'monitoring' | 'polling' | 'review';
+const CONFIG_TAB_STORAGE_KEY = 'config-management:tab';
 
 function getLocalizedErrorMessage(
   error: unknown,
@@ -245,7 +246,13 @@ export function LoginPage() {
         if (autoLoggedIn) {
           setAutoLoginSuccess(true);
           setTimeout(() => {
-            const redirect = (location.state as RedirectState | null)?.from?.pathname || '/';
+            const redirect =
+              autoLoggedIn.recoveryMode === 'manager_config'
+                ? '/config'
+                : (location.state as RedirectState | null)?.from?.pathname || '/';
+            if (autoLoggedIn.recoveryMode === 'manager_config') {
+              localStorage.setItem(CONFIG_TAB_STORAGE_KEY, 'manager');
+            }
             navigate(redirect, { replace: true });
           }, 1500);
           return;
@@ -409,7 +416,7 @@ export function LoginPage() {
         );
       }
 
-      await login({
+      const loginResult = await login({
         apiBase: isManagerServerMode ? detectedBase : baseToUse,
         managementKey: isManagerServerMode ? trimmedAdminKey : trimmedCPAKey,
         rememberPassword: rememberCredential,
@@ -417,7 +424,12 @@ export function LoginPage() {
         sessionPanelBase: detectedBase,
       });
       showNotification(t('common.connected_status'), 'success');
-      navigate('/', { replace: true });
+      if (loginResult.recoveryMode === 'manager_config') {
+        localStorage.setItem(CONFIG_TAB_STORAGE_KEY, 'manager');
+        navigate('/config', { replace: true });
+      } else {
+        navigate('/', { replace: true });
+      }
     } catch (err: unknown) {
       const message = getLocalizedErrorMessage(err, t);
       setError(message);
