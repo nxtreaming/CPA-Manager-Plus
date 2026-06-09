@@ -1,4 +1,10 @@
-import { useCallback, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
+import {
+  useCallback,
+  useMemo,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import type {
@@ -32,6 +38,7 @@ import {
   IconSearch,
   IconShield,
   IconTrendingUp,
+  IconX,
 } from '@/components/ui/icons';
 import { useThemeStore } from '@/stores';
 import {
@@ -57,6 +64,9 @@ import {
   type UsageEntityTrendSeries,
   type UsageInsight,
   type UsageAnalyticsGranularity,
+  type UsageAnalyticsResolvedGranularity,
+  type UsageAnalyticsCacheStatus,
+  type UsageAnalyticsLatencyFilter,
   type UsageAnalyticsStatus,
   type UsageDrilldownEvent,
   type UsageHeatmapPoint,
@@ -90,6 +100,11 @@ const trendMetricOptions: Array<{ value: UsageTrendMetricKey; labelKey: string }
 
 const chartHeight = 360;
 const compactChartHeight = 220;
+const usageHealthTimelineHourMs = 60 * 60 * 1000;
+const usageHealthTimelineDayMs = 24 * usageHealthTimelineHourMs;
+const usageHealthTimelineCompactThresholdMs = 7 * usageHealthTimelineDayMs;
+const usageHealthTimelineMaxCompactCells = 42;
+const usageHealthTimelineHourLabels = [0, 6, 12, 18, 23];
 
 type UsageTrendChartOption = ComposeOption<
   | DataZoomComponentOption
@@ -126,6 +141,42 @@ type EntityTrendChartOption = ComposeOption<
 type HeatmapChartOption = ComposeOption<
   GridComponentOption | HeatmapSeriesOption | TooltipComponentOption | VisualMapComponentOption
 >;
+
+type HealthTimelineTone = 'empty' | 'good' | 'warn' | 'bad' | 'outside';
+
+type HealthTimelineCell = {
+  averageLatencyMs: number | null;
+  bucketMs: number;
+  bucketEndMs: number;
+  failureCount: number;
+  failureRate: number;
+  id: string;
+  intensity: number;
+  label: string;
+  requestCount: number;
+  successCount: number;
+  successRate: number;
+  tone: HealthTimelineTone;
+};
+
+type HealthTimelineRow = {
+  cells: HealthTimelineCell[];
+  id: string;
+  label: string;
+};
+
+type HealthTimelineMatrix = {
+  cells: HealthTimelineCell[];
+  mode: 'hour' | 'day';
+  rows: HealthTimelineRow[];
+  summary: {
+    failureCount: number;
+    requestCount: number;
+    successCount: number;
+  };
+};
+
+type HealthCellStyle = CSSProperties & Record<'--cell-intensity', number>;
 
 const usageChartAxisKeys = {
   requests: 0,
@@ -169,18 +220,18 @@ const lightUsageChartTheme: UsageChartTheme = {
     tokens: '#14b8a6',
     cost: '#f59e0b',
   },
-  categoryPalette: ['#409eff', '#14b8a6', '#8b5cf6', '#f59e0b', '#94a3b8'],
-  heatmapColors: ['#eff6ff', '#93c5fd', '#409eff', '#7c3aed'],
+  categoryPalette: ['#409eff', '#14b8a6', '#f59e0b', '#f56c6c', '#94a3b8'],
+  heatmapColors: ['#eff6ff', '#93c5fd', '#409eff', '#0f766e'],
   healthColors: {
     failure: '#f56c6c',
-    latency: '#7c3aed',
+    latency: '#0ea5e9',
     success: '#67c23a',
   },
   metricColors: {
     cachedTokens: '#06b6d4',
     estimatedCost: '#f59e0b',
     inputTokens: '#60a5fa',
-    outputTokens: '#8b5cf6',
+    outputTokens: '#22c55e',
     requestCount: '#409eff',
     totalTokens: '#14b8a6',
   },
@@ -201,7 +252,7 @@ const lightUsageChartTheme: UsageChartTheme = {
     tooltipShadow: 'box-shadow: 0 16px 36px rgba(15, 23, 42, 0.14);',
     tooltipText: '#2c3e50',
   },
-  tokenStructureColors: ['#3b82f6', '#8b5cf6', '#14b8a6', '#f59e0b'],
+  tokenStructureColors: ['#60a5fa', '#22c55e', '#06b6d4', '#f59e0b'],
 };
 
 const darkUsageChartTheme: UsageChartTheme = {
@@ -210,18 +261,18 @@ const darkUsageChartTheme: UsageChartTheme = {
     tokens: '#2dd4bf',
     cost: '#fbbf24',
   },
-  categoryPalette: ['#79bbff', '#2dd4bf', '#a78bfa', '#fbbf24', '#a3a6ad'],
+  categoryPalette: ['#79bbff', '#2dd4bf', '#fbbf24', '#fab6b6', '#a3a6ad'],
   heatmapColors: ['#102f4f', '#1d5f98', '#409eff', '#79bbff'],
   healthColors: {
     failure: '#fab6b6',
-    latency: '#c4b5fd',
+    latency: '#7dd3fc',
     success: '#95d475',
   },
   metricColors: {
     cachedTokens: '#22d3ee',
     estimatedCost: '#fbbf24',
     inputTokens: '#60a5fa',
-    outputTokens: '#a78bfa',
+    outputTokens: '#95d475',
     requestCount: '#79bbff',
     totalTokens: '#2dd4bf',
   },
@@ -242,7 +293,7 @@ const darkUsageChartTheme: UsageChartTheme = {
     tooltipShadow: 'box-shadow: 0 16px 36px rgba(0, 0, 0, 0.38);',
     tooltipText: '#e5e5e5',
   },
-  tokenStructureColors: ['#60a5fa', '#a78bfa', '#2dd4bf', '#fbbf24'],
+  tokenStructureColors: ['#60a5fa', '#95d475', '#22d3ee', '#fbbf24'],
 };
 
 const getUsageChartTheme = (resolvedTheme: 'light' | 'dark'): UsageChartTheme =>
@@ -368,8 +419,6 @@ type StableUsageOptionCache = {
   models: string[];
   providers: string[];
   authFiles: string[];
-  projectIds: string[];
-  requestTypes: string[];
   apiKeys: SelectOption[];
 };
 
@@ -377,8 +426,6 @@ const emptyStableOptionCache = (): StableUsageOptionCache => ({
   models: [],
   providers: [],
   authFiles: [],
-  projectIds: [],
-  requestTypes: [],
   apiKeys: [],
 });
 
@@ -398,8 +445,6 @@ const mergeStableOptionCache = (
   models: buildOptionValues([...current.models, ...incoming.models]),
   providers: buildOptionValues([...current.providers, ...incoming.providers]),
   authFiles: buildOptionValues([...current.authFiles, ...incoming.authFiles]),
-  projectIds: buildOptionValues([...current.projectIds, ...incoming.projectIds]),
-  requestTypes: buildOptionValues([...current.requestTypes, ...incoming.requestTypes]),
   apiKeys: mergeSelectOptions([...current.apiKeys, ...incoming.apiKeys]),
 });
 
@@ -407,8 +452,6 @@ const stableOptionCachesEqual = (left: StableUsageOptionCache, right: StableUsag
   left.models.join('\n') === right.models.join('\n') &&
   left.providers.join('\n') === right.providers.join('\n') &&
   left.authFiles.join('\n') === right.authFiles.join('\n') &&
-  left.projectIds.join('\n') === right.projectIds.join('\n') &&
-  left.requestTypes.join('\n') === right.requestTypes.join('\n') &&
   left.apiKeys.map((option) => `${option.value}:${option.label}`).join('\n') ===
     right.apiKeys.map((option) => `${option.value}:${option.label}`).join('\n');
 
@@ -993,6 +1036,448 @@ function CostRankChart({ rows, title }: { rows: UsageRankRow[]; title: string })
       style={{ height: Math.max(180, chartRows.length * 36 + 26) }}
       ariaLabel={title}
     />
+  );
+}
+
+const healthToneClassMap: Record<HealthTimelineTone, string> = {
+  bad: 'healthTimelineBad',
+  empty: 'healthTimelineEmpty',
+  good: 'healthTimelineGood',
+  outside: 'healthTimelineOutside',
+  warn: 'healthTimelineWarn',
+};
+
+const healthToneLabelKeys: Record<HealthTimelineTone, string> = {
+  bad: 'usage_analytics.health_timeline_failure',
+  empty: 'usage_analytics.health_timeline_no_request',
+  good: 'usage_analytics.health_timeline_success',
+  outside: 'usage_analytics.health_timeline_outside',
+  warn: 'usage_analytics.health_timeline_warning',
+};
+
+const localTimelineDayStartMs = (timestampMs: number) => {
+  const date = new Date(timestampMs);
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+};
+
+const formatTimelineDayLabel = (bucketMs: number, locale: string) =>
+  new Date(bucketMs).toLocaleDateString(locale, {
+    day: '2-digit',
+    month: '2-digit',
+  });
+
+const formatTimelineHourLabel = (bucketMs: number, locale: string) =>
+  new Date(bucketMs).toLocaleTimeString(locale, {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+
+const getHealthTimelineTone = (
+  requestCount: number,
+  failureRate: number,
+  inRange: boolean
+): HealthTimelineTone => {
+  if (!inRange) return 'outside';
+  if (requestCount <= 0) return 'empty';
+  if (failureRate >= 0.1) return 'bad';
+  if (failureRate > 0) return 'warn';
+  return 'good';
+};
+
+const buildEmptyHealthTimelineCell = ({
+  bucketMs,
+  bucketSizeMs,
+  inRange,
+  label,
+}: {
+  bucketMs: number;
+  bucketSizeMs: number;
+  inRange: boolean;
+  label: string;
+}): HealthTimelineCell => ({
+  averageLatencyMs: null,
+  bucketEndMs: bucketMs + bucketSizeMs,
+  bucketMs,
+  failureCount: 0,
+  failureRate: 0,
+  id: String(bucketMs),
+  intensity: 0,
+  label,
+  requestCount: 0,
+  successCount: 0,
+  successRate: 0,
+  tone: getHealthTimelineTone(0, 0, inRange),
+});
+
+const buildHealthTimelineCell = ({
+  bucketMs,
+  bucketSizeMs,
+  inRange,
+  label,
+  maxRequests,
+  point,
+}: {
+  bucketMs: number;
+  bucketSizeMs: number;
+  inRange: boolean;
+  label: string;
+  maxRequests: number;
+  point?: UsageTimelinePoint;
+}): HealthTimelineCell => {
+  if (!point) {
+    return buildEmptyHealthTimelineCell({ bucketMs, bucketSizeMs, inRange, label });
+  }
+
+  return {
+    averageLatencyMs: point.averageLatencyMs,
+    bucketEndMs: point.bucketEndMs,
+    bucketMs,
+    failureCount: point.failureCount,
+    failureRate: point.failureRate,
+    id: String(bucketMs),
+    intensity:
+      maxRequests > 0 ? Math.min(1, Math.max(0.18, point.requestCount / maxRequests)) : 0,
+    label,
+    requestCount: point.requestCount,
+    successCount: point.successCount,
+    successRate: point.successRate,
+    tone: getHealthTimelineTone(point.requestCount, point.failureRate, inRange),
+  };
+};
+
+const buildAggregatedHealthTimelineCell = ({
+  bucketMs,
+  bucketSizeMs,
+  inRange,
+  label,
+  maxRequests,
+  points,
+}: {
+  bucketMs: number;
+  bucketSizeMs: number;
+  inRange: boolean;
+  label: string;
+  maxRequests: number;
+  points: UsageTimelinePoint[];
+}): HealthTimelineCell => {
+  if (points.length === 0) {
+    return buildEmptyHealthTimelineCell({ bucketMs, bucketSizeMs, inRange, label });
+  }
+
+  const requestCount = points.reduce((sum, point) => sum + point.requestCount, 0);
+  const successCount = points.reduce((sum, point) => sum + point.successCount, 0);
+  const failureCount = points.reduce((sum, point) => sum + point.failureCount, 0);
+  const latencyWeight = points.reduce(
+    (sum, point) => sum + (point.averageLatencyMs === null ? 0 : point.requestCount),
+    0
+  );
+  const averageLatencyMs =
+    latencyWeight > 0
+      ? points.reduce(
+          (sum, point) =>
+            sum +
+            (point.averageLatencyMs === null ? 0 : point.averageLatencyMs * point.requestCount),
+          0
+        ) / latencyWeight
+      : null;
+  const successRate = requestCount > 0 ? successCount / requestCount : 0;
+  const failureRate = requestCount > 0 ? failureCount / requestCount : 0;
+
+  return {
+    averageLatencyMs,
+    bucketEndMs: bucketMs + bucketSizeMs,
+    bucketMs,
+    failureCount,
+    failureRate,
+    id: String(bucketMs),
+    intensity:
+      maxRequests > 0 && requestCount > 0
+        ? Math.min(1, Math.max(0.18, requestCount / maxRequests))
+        : 0,
+    label,
+    requestCount,
+    successCount,
+    successRate,
+    tone: getHealthTimelineTone(requestCount, failureRate, inRange),
+  };
+};
+
+const groupHealthTimelinePointsByLocalDay = (timeline: UsageTimelinePoint[]) => {
+  const grouped = new Map<number, UsageTimelinePoint[]>();
+  for (const point of timeline) {
+    const dayMs = localTimelineDayStartMs(point.bucketMs);
+    const points = grouped.get(dayMs);
+    if (points) {
+      points.push(point);
+    } else {
+      grouped.set(dayMs, [point]);
+    }
+  }
+  return grouped;
+};
+
+const buildHealthTimelineMatrix = ({
+  bounds,
+  granularity,
+  locale,
+  timeline,
+}: {
+  bounds: { fromMs: number; toMs: number } | null;
+  granularity: UsageAnalyticsResolvedGranularity;
+  locale: string;
+  timeline: UsageTimelinePoint[];
+}): HealthTimelineMatrix => {
+  const summary = timeline.reduce(
+    (current, point) => ({
+      failureCount: current.failureCount + point.failureCount,
+      requestCount: current.requestCount + point.requestCount,
+      successCount: current.successCount + point.successCount,
+    }),
+    { failureCount: 0, requestCount: 0, successCount: 0 }
+  );
+
+  if (timeline.length === 0) {
+    return { cells: [], mode: granularity, rows: [], summary };
+  }
+
+  const pointByBucket = new Map(timeline.map((point) => [point.bucketMs, point]));
+  const maxRequests = timeline.reduce((max, point) => Math.max(max, point.requestCount), 0);
+  const firstPoint = timeline[0];
+  const lastPoint = timeline[timeline.length - 1];
+  const fromMs = bounds?.fromMs ?? firstPoint.bucketMs;
+  const toMs = bounds?.toMs ?? lastPoint.bucketEndMs;
+  const durationMs = Math.max(0, toMs - fromMs);
+  const useCompactDayMode =
+    granularity === 'day' || durationMs > usageHealthTimelineCompactThresholdMs;
+  const rows: HealthTimelineRow[] = [];
+
+  if (useCompactDayMode) {
+    const startDayMs = localTimelineDayStartMs(fromMs);
+    const endDayMs = localTimelineDayStartMs(Math.max(fromMs, toMs - 1));
+    const pointsByDay = groupHealthTimelinePointsByLocalDay(timeline);
+    const cells: HealthTimelineCell[] = [];
+    const dayStarts: number[] = [];
+    for (let dayMs = startDayMs; dayMs <= endDayMs; dayMs += usageHealthTimelineDayMs) {
+      dayStarts.push(dayMs);
+    }
+    const groupSize = Math.max(
+      1,
+      Math.ceil(dayStarts.length / usageHealthTimelineMaxCompactCells)
+    );
+    const dayGroups: number[][] = [];
+    for (let index = 0; index < dayStarts.length; index += groupSize) {
+      dayGroups.push(dayStarts.slice(index, index + groupSize));
+    }
+    const maxGroupRequests = dayGroups.reduce(
+      (max, groupDays) =>
+        Math.max(
+          max,
+          groupDays
+            .flatMap((dayMs) => pointsByDay.get(dayMs) ?? [])
+            .reduce((sum, point) => sum + point.requestCount, 0)
+        ),
+      0
+    );
+
+    for (const groupDays of dayGroups) {
+      const bucketMs = groupDays[0];
+      const bucketEndMs = groupDays[groupDays.length - 1] + usageHealthTimelineDayMs;
+      const label =
+        groupDays.length > 1
+          ? `${formatTimelineDayLabel(bucketMs, locale)} - ${formatTimelineDayLabel(
+              groupDays[groupDays.length - 1],
+              locale
+            )}`
+          : formatTimelineDayLabel(bucketMs, locale);
+      const inRange = bucketEndMs > fromMs && bucketMs < toMs;
+      const cell = buildAggregatedHealthTimelineCell({
+        bucketMs,
+        bucketSizeMs: bucketEndMs - bucketMs,
+        inRange,
+        label,
+        maxRequests: maxGroupRequests,
+        points: groupDays.flatMap((dayMs) => pointsByDay.get(dayMs) ?? []),
+      });
+      cells.push(cell);
+    }
+
+    return {
+      cells,
+      mode: 'day',
+      rows: [{ cells, id: 'days', label: '' }],
+      summary,
+    };
+  }
+
+  const startDayMs = localTimelineDayStartMs(fromMs);
+  const endDayMs = localTimelineDayStartMs(Math.max(fromMs, toMs - 1));
+  const cells: HealthTimelineCell[] = [];
+
+  for (let dayMs = startDayMs; dayMs <= endDayMs; dayMs += usageHealthTimelineDayMs) {
+    const rowCells = Array.from({ length: 24 }, (_, hour) => {
+      const bucketMs = dayMs + hour * usageHealthTimelineHourMs;
+      const inRange = bucketMs + usageHealthTimelineHourMs > fromMs && bucketMs < toMs;
+      const cell = buildHealthTimelineCell({
+        bucketMs,
+        bucketSizeMs: usageHealthTimelineHourMs,
+        inRange,
+        label: formatTimelineHourLabel(bucketMs, locale),
+        maxRequests,
+        point: pointByBucket.get(bucketMs),
+      });
+      cells.push(cell);
+      return cell;
+    });
+    rows.push({
+      cells: rowCells,
+      id: String(dayMs),
+      label: formatTimelineDayLabel(dayMs, locale),
+    });
+  }
+
+  return { cells, mode: 'hour', rows, summary };
+};
+
+const buildHealthTimelineTitle = (
+  cell: HealthTimelineCell,
+  t: ReturnType<typeof useTranslation>['t']
+) =>
+  [
+    cell.label,
+    `${t('usage_analytics.health_timeline_status')}: ${t(healthToneLabelKeys[cell.tone])}`,
+    `${t('usage_analytics.metric_request_count')}: ${formatMetricValue(
+      'requestCount',
+      cell.requestCount
+    )}`,
+    `${t('usage_analytics.success_rate')}: ${formatPercent(cell.successRate)}`,
+    `${t('usage_analytics.failure_rate')}: ${formatPercent(cell.failureRate)}`,
+    `${t('usage_analytics.metric_average_latency')}: ${formatUsageDurationMs(
+      cell.averageLatencyMs
+    )}`,
+  ].join('\n');
+
+function RequestHealthTimeline({
+  bounds,
+  granularity,
+  timeline,
+}: {
+  bounds: { fromMs: number; toMs: number } | null;
+  granularity: UsageAnalyticsResolvedGranularity;
+  timeline: UsageTimelinePoint[];
+}) {
+  const { t, i18n } = useTranslation();
+  const matrix = useMemo(
+    () =>
+      buildHealthTimelineMatrix({
+        bounds,
+        granularity,
+        locale: i18n.language,
+        timeline,
+      }),
+    [bounds, granularity, i18n.language, timeline]
+  );
+  const { summary } = matrix;
+  const successRate =
+    summary.requestCount > 0 ? summary.successCount / summary.requestCount : 0;
+  const failureRate =
+    summary.requestCount > 0 ? summary.failureCount / summary.requestCount : 0;
+
+  if (matrix.cells.length === 0) {
+    return (
+      <div className={styles.chartEmptyInline}>
+        <IconInbox size={24} />
+        <span>{t('usage_analytics.empty_title')}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className={styles.healthTimelinePanel}>
+      <div className={styles.healthTimelineSummary}>
+        <strong>{formatPercent(successRate)}</strong>
+        <div className={styles.healthTimelineCounts}>
+          <span>
+            <i className={styles.healthTimelineGood} />{' '}
+            {formatMetricValue('requestCount', summary.successCount)}
+          </span>
+          <span>
+            <i className={styles.healthTimelineBad} />{' '}
+            {formatMetricValue('requestCount', summary.failureCount)}
+          </span>
+          <span>{formatPercent(failureRate)}</span>
+        </div>
+      </div>
+
+      {matrix.mode === 'hour' ? (
+        <div
+          className={styles.healthTimelineMatrix}
+          role="list"
+          aria-label={t('usage_analytics.health_timeline_title')}
+        >
+          <div className={styles.healthTimelineHourAxis}>
+            {usageHealthTimelineHourLabels.map((hour) => (
+              <span key={hour} style={{ gridColumn: hour + 2 }}>
+                {String(hour).padStart(2, '0')}
+              </span>
+            ))}
+          </div>
+          {matrix.rows.map((row) => (
+            <div key={row.id} className={styles.healthTimelineRow}>
+              <span className={styles.healthTimelineRowLabel}>{row.label}</span>
+              <div className={styles.healthTimelineCells}>
+                {row.cells.map((cell) => {
+                  const title = buildHealthTimelineTitle(cell, t);
+                  return (
+                    <span
+                      key={cell.id}
+                      role="listitem"
+                      className={`${styles.healthTimelineCell} ${
+                        styles[healthToneClassMap[cell.tone]]
+                      }`}
+                      style={{ '--cell-intensity': cell.intensity } as HealthCellStyle}
+                      title={title}
+                      aria-label={title}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div
+          className={styles.healthTimelineDayGrid}
+          role="list"
+          aria-label={t('usage_analytics.health_timeline_title')}
+        >
+          {matrix.cells.map((cell) => {
+            const title = buildHealthTimelineTitle(cell, t);
+            return (
+              <span
+                key={cell.id}
+                role="listitem"
+                className={`${styles.healthTimelineCell} ${
+                  styles[healthToneClassMap[cell.tone]]
+                }`}
+                style={{ '--cell-intensity': cell.intensity } as HealthCellStyle}
+                title={title}
+                aria-label={title}
+              />
+            );
+          })}
+        </div>
+      )}
+
+      <div className={styles.healthTimelineLegend}>
+        {(['empty', 'good', 'warn', 'bad', 'outside'] as HealthTimelineTone[]).map((tone) => (
+          <span key={tone}>
+            <i className={styles[healthToneClassMap[tone]]} />
+            {t(healthToneLabelKeys[tone])}
+          </span>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -1777,17 +2262,21 @@ function UsageAnalyticsPageInner() {
     useState<UsageMetricKey[]>(DEFAULT_SELECTED_METRICS);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [customStartInput, setCustomStartInput] = useState(() =>
-    formatDateTimeLocalValue(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000))
+    formatDateTimeLocalValue(
+      new Date(usage.filters.customRange?.startMs ?? Date.now() - 24 * 60 * 60 * 1000)
+    )
   );
-  const [customEndInput, setCustomEndInput] = useState(() => formatDateTimeLocalValue(new Date()));
+  const [customEndInput, setCustomEndInput] = useState(() =>
+    formatDateTimeLocalValue(new Date(usage.filters.customRange?.endMs ?? Date.now()))
+  );
   const [stableOptionCache, setStableOptionCache] = useState<StableUsageOptionCache>(() =>
     emptyStableOptionCache()
   );
-  const allOptionLabel = t('usage_analytics.all');
   const allModelOptionLabel = t('monitoring.filter_all_models');
   const allApiKeyOptionLabel = t('monitoring.filter_all_api_keys');
   const allProviderOptionLabel = t('monitoring.filter_all_providers');
   const allStatusOptionLabel = t('monitoring.filter_all_statuses');
+  const allAuthFileOptionLabel = t('usage_analytics.filter_all_auth_files');
 
   const incomingOptionCache = useMemo<StableUsageOptionCache>(() => {
     const apiKeys = mergeSelectOptions([
@@ -1816,11 +2305,6 @@ function UsageAnalyticsPageInner() {
         ...(usage.filterOptions?.auth_files ?? []),
         ...usage.credentialRows.map((row) => row.authFile),
       ]),
-      projectIds: buildOptionValues([
-        ...(usage.filterOptions?.project_ids ?? []),
-        ...usage.credentialRows.map((row) => row.projectId),
-      ]),
-      requestTypes: buildOptionValues(usage.filterOptions?.request_types ?? []),
       apiKeys,
     };
   }, [
@@ -1829,9 +2313,7 @@ function UsageAnalyticsPageInner() {
     usage.filterOptions?.api_key_stats,
     usage.filterOptions?.auth_files,
     usage.filterOptions?.model_stats,
-    usage.filterOptions?.project_ids,
     usage.filterOptions?.providers,
-    usage.filterOptions?.request_types,
     usage.modelRows,
   ]);
 
@@ -1895,34 +2377,27 @@ function UsageAnalyticsPageInner() {
   const authFileOptions = useMemo<SelectOption[]>(
     () =>
       buildStableSelectOptions(
-        allOptionLabel,
+        allAuthFileOptionLabel,
         displayOptionCache.authFiles,
         usage.filters.authFile
       ),
-    [allOptionLabel, displayOptionCache.authFiles, usage.filters.authFile]
-  );
-  const projectOptions = useMemo<SelectOption[]>(
-    () =>
-      buildStableSelectOptions(
-        allOptionLabel,
-        displayOptionCache.projectIds,
-        usage.filters.projectId
-      ),
-    [allOptionLabel, displayOptionCache.projectIds, usage.filters.projectId]
-  );
-  const requestTypeOptions = useMemo<SelectOption[]>(
-    () =>
-      buildStableSelectOptions(
-        allOptionLabel,
-        displayOptionCache.requestTypes,
-        usage.filters.requestType
-      ),
-    [allOptionLabel, displayOptionCache.requestTypes, usage.filters.requestType]
+    [allAuthFileOptionLabel, displayOptionCache.authFiles, usage.filters.authFile]
   );
   const statusOptions: SelectOption[] = [
     { value: 'all', label: allStatusOptionLabel },
     { value: 'success', label: t('usage_analytics.status_success') },
     { value: 'failed', label: t('usage_analytics.status_failed') },
+  ];
+  const latencyOptions: SelectOption[] = [
+    { value: 'all', label: t('usage_analytics.latency_all') },
+    { value: '3000', label: t('usage_analytics.latency_over_3000') },
+    { value: '10000', label: t('usage_analytics.latency_over_10000') },
+    { value: '30000', label: t('usage_analytics.latency_over_30000') },
+  ];
+  const cacheStatusOptions: SelectOption[] = [
+    { value: 'all', label: t('usage_analytics.cache_status_all') },
+    { value: 'hit', label: t('usage_analytics.cache_status_hit') },
+    { value: 'miss', label: t('usage_analytics.cache_status_miss') },
   ];
   const trendMetricSelectOptions: SelectOption[] = trendMetricOptions.map((option) => ({
     value: option.value,
@@ -1959,7 +2434,7 @@ function UsageAnalyticsPageInner() {
   );
 
   const overviewAnomalySummary = useMemo(
-    () => summarizeAnomalies(usage.anomalyPoints, { minRequests: 10, limit: 3 }),
+    () => summarizeAnomalies(usage.anomalyPoints, { minRequests: 10, limit: 5 }),
     [usage.anomalyPoints]
   );
   const overviewSummaryCards = useMemo(
@@ -1994,7 +2469,7 @@ function UsageAnalyticsPageInner() {
   const modelSummaryCards = useMemo(
     () =>
       buildUsageEntitySummaryCards({
-        activeAccent: 'indigo',
+        activeAccent: 'teal',
         activeCount: usage.modelRows.length,
         activeIcon: 'model',
         activeLabel: t('usage_analytics.active_models'),
@@ -2008,7 +2483,7 @@ function UsageAnalyticsPageInner() {
   const apiKeySummaryCards = useMemo(
     () =>
       buildUsageEntitySummaryCards({
-        activeAccent: 'violet',
+        activeAccent: 'blue',
         activeCount: usage.apiKeyRows.length,
         activeIcon: 'key',
         activeLabel: t('usage_analytics.active_api_keys'),
@@ -2075,170 +2550,194 @@ function UsageAnalyticsPageInner() {
 
   return (
     <div className={styles.page}>
-      <div className={styles.tabSwitchPanel}>
-        <SegmentedTabs
-          items={usageTabItems}
-          activeTab={usage.activeTab}
-          onChange={usage.setActiveTab}
-          ariaLabel={t('usage_analytics.tabs_label')}
-          idBase="usage-analytics-tab"
-          className={styles.tabs}
-        />
-      </div>
-
-      <section className={styles.filterPanel}>
-        <div className={styles.controlBar}>
-          <div
-            className={styles.segmentedControl}
-            aria-label={t('usage_analytics.filter_time_range')}
-          >
-            {USAGE_TIME_RANGES.map((range) => (
-              <button
-                key={range}
-                type="button"
-                className={`${styles.segmentButton} ${
-                  usage.filters.timeRange === range ? styles.segmentButtonActive : ''
-                }`}
-                onClick={() => updateFilters({ timeRange: range })}
-              >
-                {t(`usage_analytics.range_${range}`)}
-              </button>
-            ))}
-          </div>
-
-          <div
-            className={styles.segmentedControl}
-            aria-label={t('usage_analytics.filter_granularity')}
-          >
-            {(['auto', 'hour', 'day'] as UsageAnalyticsGranularity[]).map((granularity) => (
-              <button
-                key={granularity}
-                type="button"
-                className={`${styles.segmentButton} ${
-                  usage.filters.granularity === granularity ? styles.segmentButtonActive : ''
-                }`}
-                onClick={() => updateFilters({ granularity })}
-              >
-                {t(`usage_analytics.granularity_${granularity}`)}
-              </button>
-            ))}
-          </div>
-
-          <div className={styles.refreshControls}>
-            <span className={styles.filterMeta}>
-              {t('usage_analytics.resolved_granularity', {
-                granularity: usage.resolvedGranularity,
-              })}
-            </span>
-            <button
-              type="button"
-              className={styles.filterActionButton}
-              onClick={usage.resetFilters}
-            >
-              {t('usage_analytics.clear_all')}
-            </button>
-            <button
-              type="button"
-              className={styles.filterActionButton}
-              onClick={() => setAdvancedOpen((open) => !open)}
-            >
-              {advancedOpen
-                ? t('usage_analytics.hide_advanced_filters')
-                : t('usage_analytics.show_advanced_filters')}
-            </button>
-            <Button variant="secondary" size="sm" onClick={usage.refresh} loading={usage.loading}>
-              <IconRefreshCw size={15} />
-              {t('common.refresh')}
-            </Button>
-          </div>
+      <section className={styles.controlsPanel}>
+        <div className={styles.controlsTabsRow}>
+          <SegmentedTabs
+            items={usageTabItems}
+            activeTab={usage.activeTab}
+            onChange={usage.setActiveTab}
+            ariaLabel={t('usage_analytics.tabs_label')}
+            idBase="usage-analytics-tab"
+            className={styles.tabs}
+          />
         </div>
 
-        <div className={styles.filterBar}>
-          <div className={styles.filterGrid}>
-            <Select
-              value={usage.filters.model}
-              options={modelOptions}
-              onChange={(model) => updateFilters({ model })}
-              ariaLabel={t('usage_analytics.filter_model')}
-              triggerClassName={styles.filterSelectTrigger}
-            />
-            <Select
-              value={usage.filters.apiKeyHash}
-              options={apiKeyOptions}
-              onChange={(apiKeyHash) => updateFilters({ apiKeyHash })}
-              ariaLabel={t('usage_analytics.filter_api_key')}
-              triggerClassName={styles.filterSelectTrigger}
-            />
-            <Select
-              value={usage.filters.provider}
-              options={providerOptions}
-              onChange={(provider) => updateFilters({ provider })}
-              ariaLabel={t('usage_analytics.filter_provider')}
-              triggerClassName={styles.filterSelectTrigger}
-            />
-            <Select
-              value={usage.filters.status}
-              options={statusOptions}
-              onChange={(status) => updateFilters({ status: status as UsageAnalyticsStatus })}
-              ariaLabel={t('usage_analytics.filter_status')}
-              triggerClassName={styles.filterSelectTrigger}
-            />
-          </div>
-        </div>
+        <div className={styles.controlsFilterSection}>
+          <div className={styles.controlBar}>
+            <div
+              className={styles.segmentedControl}
+              aria-label={t('usage_analytics.filter_time_range')}
+            >
+              {USAGE_TIME_RANGES.map((range) => (
+                <button
+                  key={range}
+                  type="button"
+                  className={`${styles.segmentButton} ${
+                    usage.filters.timeRange === range ? styles.segmentButtonActive : ''
+                  }`}
+                  onClick={() => updateFilters({ timeRange: range })}
+                >
+                  {t(`usage_analytics.range_${range}`)}
+                </button>
+              ))}
+            </div>
 
-        {usage.filters.timeRange === 'custom' ? (
-          <div className={styles.customRangeRow}>
-            <input
-              type="datetime-local"
-              value={customStartInput}
-              onChange={(event) => setCustomStartInput(event.target.value)}
-              aria-label={t('usage_analytics.custom_start')}
-            />
-            <input
-              type="datetime-local"
-              value={customEndInput}
-              onChange={(event) => setCustomEndInput(event.target.value)}
-              aria-label={t('usage_analytics.custom_end')}
-            />
-            <Button variant="secondary" size="sm" onClick={applyCustomRange}>
-              {t('usage_analytics.apply_custom_range')}
-            </Button>
-          </div>
-        ) : null}
+            <div
+              className={styles.segmentedControl}
+              aria-label={t('usage_analytics.filter_granularity')}
+            >
+              {(['auto', 'hour', 'day'] as UsageAnalyticsGranularity[]).map((granularity) => (
+                <button
+                  key={granularity}
+                  type="button"
+                  className={`${styles.segmentButton} ${
+                    usage.filters.granularity === granularity ? styles.segmentButtonActive : ''
+                  }`}
+                  onClick={() => updateFilters({ granularity })}
+                >
+                  {t(`usage_analytics.granularity_${granularity}`)}
+                </button>
+              ))}
+            </div>
 
-        {advancedOpen ? (
-          <div className={styles.advancedPanel}>
-            <div className={styles.advancedGrid}>
-              <label className={styles.filterGroup}>
-                <span>{t('usage_analytics.filter_auth_file')}</span>
-                <Select
-                  value={usage.filters.authFile}
-                  options={authFileOptions}
-                  onChange={(authFile) => updateFilters({ authFile })}
-                  ariaLabel={t('usage_analytics.filter_auth_file')}
-                />
-              </label>
-              <label className={styles.filterGroup}>
-                <span>{t('usage_analytics.filter_request_type')}</span>
-                <Select
-                  value={usage.filters.requestType}
-                  options={requestTypeOptions}
-                  onChange={(requestType) => updateFilters({ requestType })}
-                  ariaLabel={t('usage_analytics.filter_request_type')}
-                />
-              </label>
-              <label className={styles.filterGroup}>
-                <span>{t('usage_analytics.filter_project_team')}</span>
-                <Select
-                  value={usage.filters.projectId}
-                  options={projectOptions}
-                  onChange={(projectId) => updateFilters({ projectId })}
-                  ariaLabel={t('usage_analytics.filter_project_team')}
-                />
-              </label>
+            <div className={styles.refreshControls}>
+              <span className={styles.filterMeta}>
+                {t('usage_analytics.resolved_granularity', {
+                  granularity: usage.resolvedGranularity,
+                })}
+              </span>
+              <button
+                type="button"
+                className={styles.filterActionButton}
+                onClick={usage.resetFilters}
+              >
+                {t('usage_analytics.clear_all')}
+              </button>
+              <button
+                type="button"
+                className={styles.filterActionButton}
+                onClick={() => setAdvancedOpen((open) => !open)}
+              >
+                {advancedOpen
+                  ? t('usage_analytics.hide_advanced_filters')
+                  : t('usage_analytics.show_advanced_filters')}
+              </button>
+              <Button variant="secondary" size="sm" onClick={usage.refresh} disabled={usage.loading}>
+                <IconRefreshCw size={15} />
+                {t('common.refresh')}
+              </Button>
             </div>
           </div>
-        ) : null}
+
+          <div className={styles.filterBar}>
+            <div className={styles.scopeSearchBar}>
+              <IconSearch size={16} />
+              <input
+                value={usage.filters.searchQuery}
+                onChange={(event) => updateFilters({ searchQuery: event.target.value })}
+                aria-label={t('usage_analytics.filter_search')}
+                placeholder={t('usage_analytics.filter_search_placeholder')}
+              />
+              {usage.filters.searchQuery.trim() ? (
+                <button
+                  type="button"
+                  className={styles.scopeSearchClear}
+                  onClick={() => updateFilters({ searchQuery: '' })}
+                  aria-label={t('usage_analytics.filter_search_clear')}
+                >
+                  <IconX size={14} />
+                </button>
+              ) : null}
+            </div>
+            <div className={styles.filterGrid}>
+              <Select
+                value={usage.filters.model}
+                options={modelOptions}
+                onChange={(model) => updateFilters({ model })}
+                ariaLabel={t('usage_analytics.filter_model')}
+                triggerClassName={styles.filterSelectTrigger}
+              />
+              <Select
+                value={usage.filters.apiKeyHash}
+                options={apiKeyOptions}
+                onChange={(apiKeyHash) => updateFilters({ apiKeyHash })}
+                ariaLabel={t('usage_analytics.filter_api_key')}
+                triggerClassName={styles.filterSelectTrigger}
+              />
+              <Select
+                value={usage.filters.provider}
+                options={providerOptions}
+                onChange={(provider) => updateFilters({ provider })}
+                ariaLabel={t('usage_analytics.filter_provider')}
+                triggerClassName={styles.filterSelectTrigger}
+              />
+              <Select
+                value={usage.filters.status}
+                options={statusOptions}
+                onChange={(status) => updateFilters({ status: status as UsageAnalyticsStatus })}
+                ariaLabel={t('usage_analytics.filter_status')}
+                triggerClassName={styles.filterSelectTrigger}
+              />
+            </div>
+          </div>
+
+          {usage.filters.timeRange === 'custom' ? (
+            <div className={styles.customRangeRow}>
+              <input
+                type="datetime-local"
+                value={customStartInput}
+                onChange={(event) => setCustomStartInput(event.target.value)}
+                aria-label={t('usage_analytics.custom_start')}
+              />
+              <input
+                type="datetime-local"
+                value={customEndInput}
+                onChange={(event) => setCustomEndInput(event.target.value)}
+                aria-label={t('usage_analytics.custom_end')}
+              />
+              <Button variant="secondary" size="sm" onClick={applyCustomRange}>
+                {t('usage_analytics.apply_custom_range')}
+              </Button>
+            </div>
+          ) : null}
+
+          {advancedOpen ? (
+            <div className={styles.advancedPanel}>
+              <div className={styles.advancedGrid}>
+                <label className={styles.filterGroup}>
+                  <Select
+                    value={usage.filters.authFile}
+                    options={authFileOptions}
+                    onChange={(authFile) => updateFilters({ authFile })}
+                    ariaLabel={t('usage_analytics.filter_auth_file')}
+                  />
+                </label>
+                <label className={styles.filterGroup}>
+                  <Select
+                    value={usage.filters.minLatencyMs}
+                    options={latencyOptions}
+                    onChange={(minLatencyMs) =>
+                      updateFilters({
+                        minLatencyMs: minLatencyMs as UsageAnalyticsLatencyFilter,
+                      })
+                    }
+                    ariaLabel={t('usage_analytics.filter_latency')}
+                  />
+                </label>
+                <label className={styles.filterGroup}>
+                  <Select
+                    value={usage.filters.cacheStatus}
+                    options={cacheStatusOptions}
+                    onChange={(cacheStatus) =>
+                      updateFilters({ cacheStatus: cacheStatus as UsageAnalyticsCacheStatus })
+                    }
+                    ariaLabel={t('usage_analytics.filter_cache_status')}
+                  />
+                </label>
+              </div>
+            </div>
+          ) : null}
+        </div>
       </section>
 
       {usage.error ? (
@@ -2281,10 +2780,15 @@ function UsageAnalyticsPageInner() {
             <div className={styles.panel}>
               <div className={styles.panelHeader}>
                 <div>
-                  <h2>{t('usage_analytics.health_trend_title')}</h2>
+                  <h2>{t('usage_analytics.health_timeline_title')}</h2>
+                  <p>{t('usage_analytics.health_timeline_hint')}</p>
                 </div>
               </div>
-              <HealthTrendChart timeline={usage.timeline} />
+              <RequestHealthTimeline
+                timeline={usage.timeline}
+                bounds={usage.bounds}
+                granularity={usage.resolvedGranularity}
+              />
             </div>
           </section>
 

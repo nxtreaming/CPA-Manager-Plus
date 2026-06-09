@@ -2,6 +2,7 @@ import { act } from 'react';
 import { create, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Button } from '@/components/ui/Button';
+import { Select } from '@/components/ui/Select';
 import {
   USAGE_ANALYTICS_DEFAULT_FILTERS,
   type UsageRankRow,
@@ -309,8 +310,6 @@ const createUsageState = (overrides: Record<string, unknown> = {}) => {
       api_key_hashes: ['abcdef1234567890'],
       providers: ['openai'],
       auth_files: ['auth.json'],
-      project_ids: ['project-a'],
-      request_types: [],
     },
     selectedBucket: point,
     selectBucket: vi.fn(),
@@ -357,6 +356,7 @@ describe('UsageAnalyticsPage', () => {
     expect(text).toContain('usage_analytics.anomaly_points_title');
     expect(text).toContain('usage_analytics.insights_title');
     expect(text).toContain('usage_analytics.overview_trend_title');
+    expect(text).toContain('usage_analytics.health_timeline_title');
     expect(text).toContain('usage_analytics.model_overview_title');
     expect(text).toContain('usage_analytics.api_key_overview_title');
     expect(text).toContain('usage_analytics.provider_overview_title');
@@ -364,6 +364,56 @@ describe('UsageAnalyticsPage', () => {
     expect(text).not.toContain('usage_analytics.favorite_views_title');
     expect(text).not.toContain('usage_analytics.recent_views_title');
     expect(text).not.toContain('usage_analytics.model_rank_title');
+  });
+
+  it('renders the overview request health timeline without click actions', () => {
+    const usageState = createUsageState();
+    mocks.usageState = usageState;
+    const renderer = renderPage();
+    const timelineCells = renderer.root
+      .findAll((node) =>
+        String(node.props.title ?? '').includes('usage_analytics.health_timeline_status')
+      );
+    const timelineButton = renderer.root
+      .findAllByType('button')
+      .find((node) =>
+        String(node.props['aria-label'] ?? '').includes('usage_analytics.health_timeline_status')
+      );
+
+    expect(timelineCells.length).toBeGreaterThan(0);
+    expect(timelineButton).toBeUndefined();
+    expect(usageState.selectBucket).not.toHaveBeenCalled();
+  });
+
+  it('compacts long hourly health timelines into bounded day cells', () => {
+    const hourMs = 60 * 60 * 1000;
+    const dayMs = 24 * hourMs;
+    const startDate = new Date(1_780_000_000_000);
+    startDate.setHours(0, 0, 0, 0);
+    const fromMs = startDate.getTime();
+    const timeline = Array.from({ length: 30 }, (_, index) =>
+      createTimelinePoint({
+        bucketMs: fromMs + index * dayMs + 12 * hourMs,
+        bucketEndMs: fromMs + index * dayMs + 13 * hourMs,
+        failureCount: index % 5 === 0 ? 1 : 0,
+        failureRate: index % 5 === 0 ? 0.1 : 0,
+        label: `day-${index + 1}`,
+        requestCount: 10,
+        successCount: index % 5 === 0 ? 9 : 10,
+        successRate: index % 5 === 0 ? 0.9 : 1,
+      })
+    );
+    mocks.usageState = createUsageState({
+      bounds: { fromMs, toMs: fromMs + 30 * dayMs },
+      resolvedGranularity: 'hour',
+      timeline,
+    });
+    const renderer = renderPage();
+    const timelineCells = renderer.root.findAll((node) =>
+      String(node.props.title ?? '').includes('usage_analytics.health_timeline_status')
+    );
+
+    expect(timelineCells).toHaveLength(30);
   });
 
   it('renders trends as a focused time-series workspace', () => {
@@ -440,12 +490,49 @@ describe('UsageAnalyticsPage', () => {
 
     clickHostButton(findHostButtonByText(renderer, 'usage_analytics.show_advanced_filters'));
 
+    const selects = renderer.root.findAllByType(Select);
+    const selectLabels = selects.map((node) => node.props.ariaLabel);
+    const cacheStatusSelect = selects.find(
+      (node) => node.props.ariaLabel === 'usage_analytics.filter_cache_status'
+    );
     const text = getText(renderer.root);
-    expect(text).toContain('usage_analytics.filter_auth_file');
-    expect(text).toContain('usage_analytics.filter_request_type');
-    expect(text).toContain('usage_analytics.filter_project_team');
-    expect(text).not.toContain('usage_analytics.common_views_title');
+    expect(selectLabels).toEqual(
+      expect.arrayContaining([
+        'usage_analytics.filter_auth_file',
+        'usage_analytics.filter_latency',
+        'usage_analytics.filter_cache_status',
+      ])
+    );
+    expect(cacheStatusSelect?.props.options.map((option: { value: string }) => option.value)).toEqual([
+      'all',
+      'hit',
+      'miss',
+    ]);
+    expect(text).not.toContain('usage_analytics.filter_auth_file');
+    expect(text).not.toContain('usage_analytics.filter_latency');
     expect(text).not.toContain('usage_analytics.filter_cache_status');
+    expect(text).not.toContain('usage_analytics.filter_exclude_zero_token');
+    expect(text).not.toContain('usage_analytics.filter_request_type');
+    expect(text).not.toContain('usage_analytics.filter_project_team');
+    expect(text).not.toContain('usage_analytics.common_views_title');
+  });
+
+  it('does not render selected filter chips for active filters', () => {
+    mocks.usageState = createUsageState({
+      filters: {
+        ...USAGE_ANALYTICS_DEFAULT_FILTERS,
+        searchQuery: 'req-42',
+        cacheStatus: 'hit',
+        minLatencyMs: '10000',
+      },
+    });
+    const renderer = renderPage();
+
+    const text = getText(renderer.root);
+    expect(text).not.toContain('usage_analytics.selected_filters');
+    expect(text).not.toContain('usage_analytics.filter_search: req-42');
+    expect(text).not.toContain('usage_analytics.filter_cache_status: usage_analytics.cache_status_hit');
+    expect(text).not.toContain('usage_analytics.filter_latency: usage_analytics.latency_over_10000');
   });
 
   it('keeps API key values masked in the API Key tab', () => {

@@ -479,7 +479,8 @@ export interface MonitoringAnalyticsFilters {
   request_types?: string[];
   include_failed?: boolean;
   failed_only?: boolean;
-  exclude_zero_token?: boolean;
+  min_latency_ms?: number;
+  cache_status?: string;
 }
 
 export interface MonitoringAnalyticsEventsPageRequest {

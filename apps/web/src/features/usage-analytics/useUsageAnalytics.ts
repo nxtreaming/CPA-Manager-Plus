@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useMonitoringAnalytics } from '@/features/monitoring/hooks/useMonitoringAnalytics';
 import {
   adaptUsageAnalyticsData,
@@ -24,6 +24,19 @@ import {
   type UsageTimelinePoint,
 } from './usageAnalyticsModel';
 
+const USAGE_SEARCH_DEBOUNCE_MS = 350;
+
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedValue(value), delayMs);
+    return () => clearTimeout(timer);
+  }, [delayMs, value]);
+
+  return debouncedValue;
+}
+
 export function useUsageAnalytics() {
   const [filters, setFiltersState] = useState<UsageAnalyticsFiltersState>(
     USAGE_ANALYTICS_DEFAULT_FILTERS
@@ -42,6 +55,10 @@ export function useUsageAnalytics() {
   const setActiveTab = useCallback((tab: UsageAnalyticsTab) => {
     setActiveTabState(tab);
   }, []);
+  const debouncedSearchQuery = useDebouncedValue(
+    filters.searchQuery.trim(),
+    USAGE_SEARCH_DEBOUNCE_MS
+  );
 
   const bounds = useMemo(() => getUsageRangeBounds(filters, nowMs), [filters, nowMs]);
   const resolvedGranularity = useMemo(
@@ -73,8 +90,9 @@ export function useUsageAnalytics() {
         drilldownPreview,
         filters: analyticsFilters,
         granularity: resolvedGranularity,
+        searchQuery: debouncedSearchQuery,
       }),
-    [analyticsFilters, bounds, drilldownPreview, resolvedGranularity]
+    [analyticsFilters, bounds, debouncedSearchQuery, drilldownPreview, resolvedGranularity]
   );
 
   const analytics = useMonitoringAnalytics({
@@ -82,6 +100,7 @@ export function useUsageAnalytics() {
     toMs: bounds?.toMs,
     nowMs,
     dataScopeKey,
+    searchQuery: debouncedSearchQuery,
     filters: analyticsFilters,
     include,
     throttleMs: 0,

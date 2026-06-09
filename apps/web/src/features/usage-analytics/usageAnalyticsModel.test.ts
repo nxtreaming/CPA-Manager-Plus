@@ -26,6 +26,7 @@ const DAY_MS = 24 * HOUR_MS;
 
 describe('usage analytics request model', () => {
   it('resolves time ranges and default granularity rules', () => {
+    expect(USAGE_ANALYTICS_DEFAULT_FILTERS.timeRange).toBe('24h');
     expect(
       getUsageRangeBounds({ timeRange: '24h', customRange: null }, NOW_MS)
     ).toEqual({
@@ -59,11 +60,15 @@ describe('usage analytics request model', () => {
         model: 'gpt-4o',
         apiKeyHash: ' ABCDEF1234 ',
         status: 'success',
+        minLatencyMs: '10000',
+        cacheStatus: 'hit',
       })
     ).toEqual({
       models: ['gpt-4o'],
       api_key_hashes: ['abcdef1234'],
       include_failed: false,
+      min_latency_ms: 10000,
+      cache_status: 'hit',
     });
     expect(
       buildUsageAnalyticsFilters({
@@ -529,12 +534,10 @@ describe('usage anomaly drilldown', () => {
         apiKeyHash: ' ABCDEF1234 ',
         provider: 'OpenAI',
         authFile: 'codex-auth.json',
-        projectId: 'project-1',
-        requestType: 'codex',
         status: 'failed',
       })
     ).toBe(
-      `/monitoring?from_ms=${NOW_MS}&to_ms=${NOW_MS + HOUR_MS}&model=gpt-4o&api_key_hash=abcdef1234&provider=openai&auth_file=codex-auth.json&project_id=project-1&request_type=codex&status=failed`
+      `/monitoring?from_ms=${NOW_MS}&to_ms=${NOW_MS + HOUR_MS}&model=gpt-4o&api_key_hash=abcdef1234&provider=openai&auth_file=codex-auth.json&status=failed`
     );
   });
 });

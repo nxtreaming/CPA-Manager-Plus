@@ -28,10 +28,8 @@ export type UsageSummaryCardAccent =
   | 'blue'
   | 'cyan'
   | 'green'
-  | 'indigo'
   | 'red'
-  | 'teal'
-  | 'violet';
+  | 'teal';
 
 export type UsageSummaryCardTone = 'bad' | 'good' | 'warn';
 
@@ -198,7 +196,7 @@ export const buildUsageOverviewSummaryCards = ({
       value: formatMetricValue('estimatedCost', summary.estimatedCost),
     },
     {
-      accent: 'indigo',
+      accent: 'teal',
       fullLabel: t('usage_analytics.metric_total_tokens'),
       icon: 'tokens',
       label: t('usage_analytics.metric_total_tokens'),
@@ -220,7 +218,7 @@ export const buildUsageOverviewSummaryCards = ({
       variant: 'secondary',
     },
     {
-      accent: 'violet',
+      accent: 'blue',
       fullLabel: t('usage_analytics.metric_output_tokens'),
       icon: 'output',
       label: t('usage_analytics.metric_output_tokens'),
@@ -260,7 +258,7 @@ export const buildUsageTrendSummaryCards = ({
 
   return [
     {
-      accent: 'indigo',
+      accent: 'blue',
       icon: 'latency',
       label: t('usage_analytics.trend_peak_request_bucket'),
       meta: peakRequestPoint
@@ -308,7 +306,7 @@ export const buildUsageTrendSummaryCards = ({
       value: peakFailurePoint ? formatPercent(peakFailurePoint.failureRate) : '-',
     },
     {
-      accent: 'violet',
+      accent: 'amber',
       icon: 'latency',
       label: t('usage_analytics.trend_p95_peak'),
       meta: t('usage_analytics.metric_p95_latency'),

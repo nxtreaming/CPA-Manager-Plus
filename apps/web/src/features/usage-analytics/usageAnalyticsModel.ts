@@ -1,4 +1,3 @@
-import type { TFunction } from 'i18next';
 import type {
   MonitoringAnalyticsAnomalyPoint,
   MonitoringAnalyticsApiKeyStatRow,
@@ -33,6 +32,8 @@ export type UsageAnalyticsTimeRange =
 export type UsageAnalyticsGranularity = 'auto' | 'hour' | 'day';
 export type UsageAnalyticsResolvedGranularity = 'hour' | 'day';
 export type UsageAnalyticsStatus = 'all' | 'success' | 'failed';
+export type UsageAnalyticsLatencyFilter = 'all' | '3000' | '10000' | '30000';
+export type UsageAnalyticsCacheStatus = 'all' | 'hit' | 'miss';
 
 export type UsageAnalyticsCustomRange = {
   startMs: number;
@@ -47,9 +48,10 @@ export type UsageAnalyticsFiltersState = {
   apiKeyHash: string;
   provider: string;
   authFile: string;
-  projectId: string;
-  requestType: string;
   status: UsageAnalyticsStatus;
+  searchQuery: string;
+  minLatencyMs: UsageAnalyticsLatencyFilter;
+  cacheStatus: UsageAnalyticsCacheStatus;
   apiKeyKeyword: string;
 };
 
@@ -319,16 +321,17 @@ export type UsageAnomalyAnalysis = {
 };
 
 export const USAGE_ANALYTICS_DEFAULT_FILTERS: UsageAnalyticsFiltersState = {
-  timeRange: '7d',
+  timeRange: '24h',
   customRange: null,
   granularity: 'auto',
   model: 'all',
   apiKeyHash: 'all',
   provider: 'all',
   authFile: 'all',
-  projectId: 'all',
-  requestType: 'all',
   status: 'all',
+  searchQuery: '',
+  minLatencyMs: 'all',
+  cacheStatus: 'all',
   apiKeyKeyword: '',
 };
 
@@ -536,41 +539,41 @@ export const buildUsageAnalyticsFilters = (
       | 'apiKeyHash'
       | 'provider'
       | 'authFile'
-      | 'projectId'
-      | 'requestType'
       | 'status'
+      | 'minLatencyMs'
+      | 'cacheStatus'
     >
   >
 ): MonitoringAnalyticsFilters => {
-	const payload: MonitoringAnalyticsFilters = {};
-	const model = filters.model ?? 'all';
-	const apiKeyHash = filters.apiKeyHash ?? 'all';
-	const provider = filters.provider ?? 'all';
-	const authFile = filters.authFile ?? 'all';
-	const projectId = filters.projectId ?? 'all';
-	const requestType = filters.requestType ?? 'all';
-	if (isActiveSelectValue(model)) {
-		payload.models = [model.trim()];
-	}
-	if (isActiveSelectValue(apiKeyHash)) {
-		payload.api_key_hashes = [normalizeLowerSelectValue(apiKeyHash)];
-	}
-	if (isActiveSelectValue(provider)) {
-		payload.providers = [normalizeLowerSelectValue(provider)];
-	}
-	if (isActiveSelectValue(authFile)) {
-		payload.auth_files = [authFile.trim()];
-	}
-	if (isActiveSelectValue(projectId)) {
-		payload.project_ids = [projectId.trim()];
-	}
-	if (isActiveSelectValue(requestType)) {
-		payload.request_types = [requestType.trim()];
-	}
+  const payload: MonitoringAnalyticsFilters = {};
+  const model = filters.model ?? 'all';
+  const apiKeyHash = filters.apiKeyHash ?? 'all';
+  const provider = filters.provider ?? 'all';
+  const authFile = filters.authFile ?? 'all';
+  if (isActiveSelectValue(model)) {
+    payload.models = [model.trim()];
+  }
+  if (isActiveSelectValue(apiKeyHash)) {
+    payload.api_key_hashes = [normalizeLowerSelectValue(apiKeyHash)];
+  }
+  if (isActiveSelectValue(provider)) {
+    payload.providers = [normalizeLowerSelectValue(provider)];
+  }
+  if (isActiveSelectValue(authFile)) {
+    payload.auth_files = [authFile.trim()];
+  }
   if (filters.status === 'success') {
     payload.include_failed = false;
   } else if (filters.status === 'failed') {
     payload.failed_only = true;
+  }
+  const minLatencyMs = filters.minLatencyMs ?? 'all';
+  if (minLatencyMs !== 'all') {
+    payload.min_latency_ms = Number(minLatencyMs);
+  }
+  const cacheStatus = filters.cacheStatus ?? 'all';
+  if (cacheStatus !== 'all') {
+    payload.cache_status = cacheStatus;
   }
   return payload;
 };
@@ -1623,10 +1626,7 @@ export const buildUsageAnomalyCauseKeys = (
 export const buildMonitoringDetailUrl = (
   point: UsageTimelinePoint | Pick<UsageServerAnomaly, 'bucketMs' | 'bucketEndMs'>,
   filters: Partial<
-    Pick<
-      UsageAnalyticsFiltersState,
-      'model' | 'apiKeyHash' | 'provider' | 'authFile' | 'projectId' | 'requestType' | 'status'
-    >
+    Pick<UsageAnalyticsFiltersState, 'model' | 'apiKeyHash' | 'provider' | 'authFile' | 'status'>
   >
 ) => {
   const params = new URLSearchParams();
@@ -1636,8 +1636,6 @@ export const buildMonitoringDetailUrl = (
   const apiKeyHash = filters.apiKeyHash ?? 'all';
   const provider = filters.provider ?? 'all';
   const authFile = filters.authFile ?? 'all';
-  const projectId = filters.projectId ?? 'all';
-  const requestType = filters.requestType ?? 'all';
   if (isActiveSelectValue(model)) {
     params.set('model', model.trim());
   }
@@ -1650,12 +1648,6 @@ export const buildMonitoringDetailUrl = (
   if (isActiveSelectValue(authFile)) {
     params.set('auth_file', authFile.trim());
   }
-  if (isActiveSelectValue(projectId)) {
-    params.set('project_id', projectId.trim());
-  }
-  if (isActiveSelectValue(requestType)) {
-    params.set('request_type', requestType.trim());
-  }
   if (filters.status && filters.status !== 'all') {
     params.set('status', filters.status);
   }
@@ -1667,61 +1659,9 @@ export type UsageSelectedFilterKey =
   | 'apiKeyHash'
   | 'provider'
   | 'authFile'
-  | 'projectId'
-  | 'requestType'
+  | 'minLatencyMs'
+  | 'cacheStatus'
   | 'status';
-
-export const buildSelectedFilterChips = (
-  filters: Pick<
-    UsageAnalyticsFiltersState,
-    'model' | 'apiKeyHash' | 'provider' | 'authFile' | 'projectId' | 'requestType' | 'status'
-  >,
-  t: TFunction
-) =>
-  [
-    isActiveSelectValue(filters.model)
-      ? {
-          key: 'model',
-          label: `${t('usage_analytics.filter_model')}: ${filters.model}`,
-        }
-      : null,
-    isActiveSelectValue(filters.apiKeyHash)
-      ? {
-          key: 'apiKeyHash',
-          label: `${t('usage_analytics.filter_api_key')}: ${maskApiKeyHash(filters.apiKeyHash)}`,
-        }
-      : null,
-    isActiveSelectValue(filters.provider)
-      ? {
-          key: 'provider',
-          label: `${t('usage_analytics.filter_provider')}: ${filters.provider}`,
-        }
-      : null,
-    isActiveSelectValue(filters.authFile)
-      ? {
-          key: 'authFile',
-          label: `${t('usage_analytics.filter_auth_file')}: ${filters.authFile}`,
-        }
-      : null,
-    isActiveSelectValue(filters.projectId)
-      ? {
-          key: 'projectId',
-          label: `${t('usage_analytics.filter_project_team')}: ${filters.projectId}`,
-        }
-      : null,
-    isActiveSelectValue(filters.requestType)
-      ? {
-          key: 'requestType',
-          label: `${t('usage_analytics.filter_request_type')}: ${filters.requestType}`,
-        }
-      : null,
-    filters.status !== 'all'
-      ? {
-          key: 'status',
-          label: `${t('usage_analytics.filter_status')}: ${t(`usage_analytics.status_${filters.status}`)}`,
-        }
-      : null,
-  ].filter(Boolean) as Array<{ key: UsageSelectedFilterKey; label: string }>;
 
 export const buildOptionValues = (values: Array<string | undefined | null>) =>
   Array.from(new Set(values.map((value) => String(value ?? '').trim()).filter(Boolean))).sort(

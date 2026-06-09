@@ -137,7 +137,7 @@ describe('usageAnalyticsPresentation', () => {
 
   it('uses entity-specific anomaly labels for entity summaries', () => {
     const cards = buildUsageEntitySummaryCards({
-      activeAccent: 'violet',
+      activeAccent: 'blue',
       activeCount: 4,
       activeIcon: 'key',
       activeLabel: 'usage_analytics.active_api_keys',
@@ -151,7 +151,7 @@ describe('usageAnalyticsPresentation', () => {
 
     expect(cards).toHaveLength(5);
     expect(cards[0]).toMatchObject({
-      accent: 'violet',
+      accent: 'blue',
       icon: 'key',
       value: '4',
     });

@@ -45,10 +45,8 @@ const summaryAccentClassMap: Record<UsageSummaryCardAccent, string> = {
   blue: styles.summaryAccentBlue,
   cyan: styles.summaryAccentCyan,
   green: styles.summaryAccentGreen,
-  indigo: styles.summaryAccentIndigo,
   red: styles.summaryAccentRed,
   teal: styles.summaryAccentTeal,
-  violet: styles.summaryAccentViolet,
 };
 
 function UsageSummaryCardView({
