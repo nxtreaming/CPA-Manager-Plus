@@ -375,7 +375,7 @@ export const USAGE_METRICS: UsageMetricDefinition[] = [
   {
     key: 'outputTokens',
     labelKey: 'usage_analytics.metric_output_tokens',
-    color: '#8b5cf6',
+    color: '#22c55e',
     axis: 'tokens',
   },
   {
@@ -1158,7 +1158,7 @@ export const buildEntityTrendSeries = (
   limit = 4
 ): UsageEntityTrendSeries[] => {
   const total = sumUsageRows(rows, metric);
-  const colors = ['#2563eb', '#0ea5a7', '#8b5cf6', '#f97316', '#64748b'];
+  const colors = ['#2563eb', '#0ea5a7', '#f59e0b', '#ef4444', '#64748b'];
   return rows
     .filter((row) => usageRankMetricValue(row, metric) > 0)
     .slice(0, limit)
