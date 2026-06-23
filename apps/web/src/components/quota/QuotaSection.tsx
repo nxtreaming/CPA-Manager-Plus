@@ -15,6 +15,7 @@ import { QuotaCard } from './QuotaCard';
 import type { QuotaStatusState } from './QuotaCard';
 import { useQuotaLoader } from './useQuotaLoader';
 import type { QuotaConfig, QuotaSortMode } from './quotaConfigs';
+import { resolveQuotaAccountDisplayText } from './quotaDisplay';
 import {
   DEFAULT_QUOTA_ACCOUNT_DISPLAY_MODE,
   type QuotaAccountDisplayMode,
@@ -168,6 +169,11 @@ export function QuotaSection<TState extends QuotaStatusState, TData>({
     },
     [onAccountDisplayModeChange]
   );
+  const getAccountDisplayName = useCallback(
+    (file: AuthFileItem) =>
+      resolveQuotaAccountDisplayText(file, resolvedAccountDisplayMode).primary,
+    [resolvedAccountDisplayMode]
+  );
 
   const filteredFiles = useMemo(
     () => files.filter((file) => config.filterFn(file)),
@@ -316,6 +322,7 @@ export function QuotaSection<TState extends QuotaStatusState, TData>({
     async (file: AuthFileItem) => {
       if (disabled || file.disabled) return;
       if (quota[file.name]?.status === 'loading') return;
+      const displayName = getAccountDisplayName(file);
 
       setQuota((prev) => ({
         ...prev,
@@ -328,7 +335,7 @@ export function QuotaSection<TState extends QuotaStatusState, TData>({
           ...prev,
           [file.name]: config.buildSuccessState(data),
         }));
-        showNotification(t('auth_files.quota_refresh_success', { name: file.name }), 'success');
+        showNotification(t('auth_files.quota_refresh_success', { name: displayName }), 'success');
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : t('common.unknown_error');
         const status = getStatusFromError(err);
@@ -337,12 +344,12 @@ export function QuotaSection<TState extends QuotaStatusState, TData>({
           [file.name]: config.buildErrorState(message, status),
         }));
         showNotification(
-          t('auth_files.quota_refresh_failed', { name: file.name, message }),
+          t('auth_files.quota_refresh_failed', { name: displayName, message }),
           'error'
         );
       }
     },
-    [config, disabled, quota, setQuota, showNotification, t]
+    [config, disabled, getAccountDisplayName, quota, setQuota, showNotification, t]
   );
 
   const resetQuotaForFile = useCallback(
@@ -356,11 +363,12 @@ export function QuotaSection<TState extends QuotaStatusState, TData>({
       const resetCount =
         (fileQuota as { rateLimitResetCreditsAvailableCount?: number | null } | undefined)
           ?.rateLimitResetCreditsAvailableCount ?? 0;
+      const displayName = getAccountDisplayName(file);
 
       showConfirmation({
         title: t(`${config.i18nPrefix}.reset_confirm_title`),
         message: t(`${config.i18nPrefix}.reset_confirm_message`, {
-          name: file.name,
+          name: displayName,
           count: resetCount,
         }),
         confirmText: t(`${config.i18nPrefix}.reset_button`, { count: resetCount }),
@@ -382,7 +390,7 @@ export function QuotaSection<TState extends QuotaStatusState, TData>({
               [file.name]: config.buildSuccessState(data),
             }));
             showNotification(
-              t(`${config.i18nPrefix}.reset_success`, { name: file.name }),
+              t(`${config.i18nPrefix}.reset_success`, { name: displayName }),
               'success'
             );
           } catch (err: unknown) {
@@ -393,14 +401,14 @@ export function QuotaSection<TState extends QuotaStatusState, TData>({
               [file.name]: config.buildErrorState(message, status),
             }));
             showNotification(
-              t(`${config.i18nPrefix}.reset_failed`, { name: file.name, message }),
+              t(`${config.i18nPrefix}.reset_failed`, { name: displayName, message }),
               'error'
             );
           }
         },
       });
     },
-    [config, disabled, quota, setQuota, showConfirmation, showNotification, t]
+    [config, disabled, getAccountDisplayName, quota, setQuota, showConfirmation, showNotification, t]
   );
 
   const titleNode = (
