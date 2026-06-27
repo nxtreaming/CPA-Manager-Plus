@@ -1,17 +1,23 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import { Drawer } from '@/components/ui/Drawer';
 import { Input } from '@/components/ui/Input';
+import { Select } from '@/components/ui/Select';
 import { HeaderInputList } from '@/components/ui/HeaderInputList';
 import { ModelInputList } from '@/components/ui/ModelInputList';
 import { Modal } from '@/components/ui/Modal';
 import { SelectionCheckbox } from '@/components/ui/SelectionCheckbox';
 import { ToggleSwitch } from '@/components/ui/ToggleSwitch';
-import { modelsApi, providersApi } from '@/services/api';
+import { apiCallApi, getApiCallErrorMessage, modelsApi, providersApi } from '@/services/api';
 import { useConfigStore, useNotificationStore } from '@/stores';
 import type { ProviderKeyConfig } from '@/types';
-import { buildHeaderObject, headersToEntries, normalizeHeaderEntries } from '@/utils/headers';
+import {
+  buildHeaderObject,
+  hasHeader,
+  headersToEntries,
+  normalizeHeaderEntries,
+} from '@/utils/headers';
 import { normalizeAuthIndex } from '@/utils/authIndex';
 import {
   areKeyValueEntriesEqual,
@@ -19,7 +25,11 @@ import {
   areStringArraysEqual,
 } from '@/utils/compare';
 import { entriesToModels, modelsToEntries } from '@/components/ui/modelInputListUtils';
-import { excludedModelsToText, parseExcludedModels } from '@/components/providers/utils';
+import {
+  buildCodexResponsesEndpoint,
+  excludedModelsToText,
+  parseExcludedModels,
+} from '@/components/providers/utils';
 import type { ProviderFormState } from '@/components/providers';
 import type { ModelInfo } from '@/utils/models';
 import styles from '@/features/aiProviders/AiProvidersPage.module.scss';
@@ -33,6 +43,9 @@ interface CodexEditDrawerProps {
 }
 
 type CodexFormBaseline = ReturnType<typeof buildCodexBaseline>;
+type TestStatus = 'idle' | 'loading' | 'success' | 'error';
+
+const CODEX_TEST_TIMEOUT_MS = 20_000;
 
 const buildEmptyForm = (): ProviderFormState => ({
   apiKey: '',
@@ -108,6 +121,10 @@ export function CodexEditDrawer({
   const [discoveredModels, setDiscoveredModels] = useState<ModelInfo[]>([]);
   const [modelDiscoverySearch, setModelDiscoverySearch] = useState('');
   const [modelDiscoverySelected, setModelDiscoverySelected] = useState<Set<string>>(new Set());
+  const [testModel, setTestModel] = useState('');
+  const [testStatus, setTestStatus] = useState<TestStatus>('idle');
+  const [testMessage, setTestMessage] = useState('');
+  const [isTesting, setIsTesting] = useState(false);
 
   const initialData = useMemo(() => {
     if (editIndex === null) return undefined;
@@ -156,14 +173,19 @@ export function CodexEditDrawer({
       };
       setForm(nextForm);
       setBaseline(buildCodexBaseline(nextForm));
+      const available = nextForm.modelEntries.map((entry) => entry.name.trim()).filter(Boolean);
+      setTestModel(available[0] || '');
     } else {
       const nextForm = buildEmptyForm();
       setForm(nextForm);
       setBaseline(buildCodexBaseline(nextForm));
+      setTestModel('');
     }
+    setTestStatus('idle');
+    setTestMessage('');
   }, [open, loaded, initialData]);
 
-  const canSave = !disabled && !saving && !loading && !invalidIndex;
+  const canSave = !disabled && !saving && !loading && !invalidIndex && !isTesting;
 
   const isDirty = useMemo(() => {
     const normalizedPriority =
@@ -220,6 +242,53 @@ export function CodexEditDrawer({
       visibleDiscoverableModelNames.every((name) => modelDiscoverySelected.has(name)),
     [modelDiscoverySelected, visibleDiscoverableModelNames]
   );
+
+  const availableModels = useMemo(
+    () => form.modelEntries.map((entry) => entry.name.trim()).filter(Boolean),
+    [form.modelEntries]
+  );
+
+  const modelSelectOptions = useMemo(() => {
+    const seen = new Set<string>();
+    return form.modelEntries.reduce<Array<{ value: string; label: string }>>((acc, entry) => {
+      const name = entry.name.trim();
+      if (!name || seen.has(name)) return acc;
+      seen.add(name);
+      const alias = entry.alias.trim();
+      acc.push({
+        value: name,
+        label: alias && alias !== name ? `${name} (${alias})` : name,
+      });
+      return acc;
+    }, []);
+  }, [form.modelEntries]);
+
+  const connectivityConfigSignature = useMemo(() => {
+    const headersSignature = form.headers
+      .map((entry) => `${entry.key.trim()}:${entry.value.trim()}`)
+      .join('|');
+    const modelsSignature = form.modelEntries
+      .map((entry) => `${entry.name.trim()}:${entry.alias.trim()}`)
+      .join('|');
+    return [
+      form.apiKey.trim(),
+      normalizeAuthIndex(form.authIndex) ?? '',
+      String(form.baseUrl ?? '').trim(),
+      testModel.trim(),
+      headersSignature,
+      modelsSignature,
+    ].join('||');
+  }, [form.apiKey, form.authIndex, form.baseUrl, form.headers, form.modelEntries, testModel]);
+  const previousConnectivityConfigRef = useRef(connectivityConfigSignature);
+
+  useEffect(() => {
+    if (previousConnectivityConfigRef.current === connectivityConfigSignature) {
+      return;
+    }
+    previousConnectivityConfigRef.current = connectivityConfigSignature;
+    setTestStatus('idle');
+    setTestMessage('');
+  }, [connectivityConfigSignature]);
 
   const mergeDiscoveredModels = useCallback(
     (selectedModels: ModelInfo[]) => {
@@ -281,6 +350,96 @@ export function CodexEditDrawer({
       setModelDiscoveryFetching(false);
     }
   }, [form.apiKey, form.authIndex, form.baseUrl, form.headers, t]);
+
+  const runCodexConnectivityTest = useCallback(async () => {
+    if (isTesting) return;
+
+    const endpoint = buildCodexResponsesEndpoint(form.baseUrl ?? '');
+    if (!endpoint) {
+      const message = t('ai_providers.codex_test_endpoint_invalid');
+      setTestStatus('error');
+      setTestMessage(message);
+      showNotification(message, 'error');
+      return;
+    }
+
+    const modelName = testModel.trim() || availableModels[0] || '';
+    if (!modelName) {
+      const message = t('ai_providers.codex_test_model_required');
+      setTestStatus('error');
+      setTestMessage(message);
+      showNotification(message, 'error');
+      return;
+    }
+
+    const customHeaders = buildHeaderObject(form.headers);
+    const apiKey = form.apiKey.trim();
+    const keyAuthIndex = normalizeAuthIndex(form.authIndex) ?? undefined;
+    const hasAuthorization = hasHeader(customHeaders, 'authorization');
+
+    if (!apiKey && !hasAuthorization && !keyAuthIndex) {
+      const message = t('ai_providers.codex_test_key_required');
+      setTestStatus('error');
+      setTestMessage(message);
+      showNotification(message, 'error');
+      return;
+    }
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...customHeaders,
+    };
+    if (!hasHeader(headers, 'authorization')) {
+      headers.Authorization = keyAuthIndex ? 'Bearer $TOKEN$' : `Bearer ${apiKey}`;
+    }
+
+    setIsTesting(true);
+    setTestStatus('loading');
+    setTestMessage(t('ai_providers.codex_test_running'));
+
+    try {
+      const result = await apiCallApi.request(
+        {
+          authIndex: keyAuthIndex,
+          method: 'POST',
+          url: endpoint,
+          header: headers,
+          data: JSON.stringify({
+            model: modelName,
+            input: 'Hi',
+            stream: false,
+          }),
+        },
+        { timeout: CODEX_TEST_TIMEOUT_MS }
+      );
+
+      if (result.statusCode < 200 || result.statusCode >= 300) {
+        throw new Error(getApiCallErrorMessage(result));
+      }
+
+      const message = t('ai_providers.codex_test_success');
+      setTestStatus('success');
+      setTestMessage(message);
+      showNotification(message, 'success');
+    } catch (err: unknown) {
+      const message = getErrorMessage(err) || t('ai_providers.codex_test_failed');
+      setTestStatus('error');
+      setTestMessage(message);
+      showNotification(`${t('ai_providers.codex_test_failed')}: ${message}`, 'error');
+    } finally {
+      setIsTesting(false);
+    }
+  }, [
+    availableModels,
+    form.apiKey,
+    form.authIndex,
+    form.baseUrl,
+    form.headers,
+    isTesting,
+    showNotification,
+    t,
+    testModel,
+  ]);
 
   const handleSave = useCallback(async () => {
     if (!canSave) return;
@@ -412,7 +571,7 @@ export function CodexEditDrawer({
 
   const footer = (
     <>
-      <Button variant="secondary" size="sm" onClick={handleClose} disabled={saving}>
+      <Button variant="secondary" size="sm" onClick={handleClose} disabled={saving || isTesting}>
         {t('common.cancel')}
       </Button>
       <Button size="sm" onClick={handleSave} loading={saving} disabled={!canSave}>
@@ -528,6 +687,69 @@ export function CodexEditDrawer({
                 removeButtonTitle={t('common.delete')}
                 removeButtonAriaLabel={t('common.delete')}
               />
+              <div className={styles.modelTestPanel}>
+                <div className={styles.modelTestMeta}>
+                  <label className={styles.modelTestLabel}>
+                    {t('ai_providers.codex_test_title')}
+                  </label>
+                  <span className={styles.modelTestHint}>{t('ai_providers.codex_test_hint')}</span>
+                </div>
+                <div className={styles.modelTestControls}>
+                  <Select
+                    value={testModel}
+                    options={modelSelectOptions}
+                    onChange={(value) => {
+                      setTestModel(value);
+                      setTestStatus('idle');
+                      setTestMessage('');
+                    }}
+                    placeholder={
+                      availableModels.length
+                        ? t('ai_providers.codex_test_select_placeholder')
+                        : t('ai_providers.codex_test_select_empty')
+                    }
+                    className={styles.openaiTestSelect}
+                    ariaLabel={t('ai_providers.codex_test_title')}
+                    disabled={
+                      disabled ||
+                      saving ||
+                      isTesting ||
+                      testStatus === 'loading' ||
+                      availableModels.length === 0
+                    }
+                  />
+                  <Button
+                    variant={testStatus === 'error' ? 'danger' : 'secondary'}
+                    size="sm"
+                    onClick={() => void runCodexConnectivityTest()}
+                    disabled={
+                      disabled ||
+                      saving ||
+                      loading ||
+                      isTesting ||
+                      testStatus === 'loading' ||
+                      availableModels.length === 0
+                    }
+                    loading={isTesting}
+                    className={styles.modelTestAllButton}
+                  >
+                    {t('ai_providers.codex_test_button')}
+                  </Button>
+                </div>
+              </div>
+              {testMessage && (
+                <div
+                  className={`status-badge ${
+                    testStatus === 'error'
+                      ? 'error'
+                      : testStatus === 'success'
+                        ? 'success'
+                        : 'muted'
+                  }`}
+                >
+                  {testMessage}
+                </div>
+              )}
             </div>
 
             <div className="form-group">
