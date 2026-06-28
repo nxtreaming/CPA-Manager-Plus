@@ -786,10 +786,43 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  position: relative;
 
   svg {
     display: block;
   }
+}
+
+.keyStatusTrigger {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: inherit;
+  outline: none;
+}
+
+.keyStatusTriggerInteractive {
+  cursor: help;
+
+  &:focus-visible {
+    border-radius: $radius-sm;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary-color) 35%, transparent);
+  }
+}
+
+.keyStatusTooltip {
+  bottom: calc(100% + 10px);
+  width: max-content;
+  max-width: min(280px, 42vw);
+  white-space: normal;
+  text-align: left;
+}
+
+.keyStatusTooltipText {
+  display: block;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .keyTableColKey,

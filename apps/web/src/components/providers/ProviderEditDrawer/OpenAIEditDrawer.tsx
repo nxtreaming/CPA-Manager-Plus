@@ -9,6 +9,7 @@ import { ModelInputList } from '@/components/ui/ModelInputList';
 import { Modal } from '@/components/ui/Modal';
 import { SelectionCheckbox } from '@/components/ui/SelectionCheckbox';
 import { ToggleSwitch } from '@/components/ui/ToggleSwitch';
+import { OpenAIKeyTestStatusIndicator } from '@/components/providers';
 import { apiCallApi, getApiCallErrorMessage, modelsApi, providersApi } from '@/services/api';
 import { useConfigStore, useNotificationStore } from '@/stores';
 import type { ApiKeyEntry, OpenAIProviderConfig } from '@/types';
@@ -132,61 +133,6 @@ const hasHeader = (headers: Record<string, string>, name: string) => {
   const target = name.toLowerCase();
   return Object.keys(headers).some((key) => key.toLowerCase() === target);
 };
-
-function StatusIcon({ status }: { status: string }) {
-  switch (status) {
-    case 'loading':
-      return (
-        <svg
-          width="16"
-          height="16"
-          viewBox="0 0 16 16"
-          fill="none"
-          className={styles.statusIconSpin}
-        >
-          <circle cx="8" cy="8" r="7" stroke="currentColor" strokeOpacity="0.25" strokeWidth="2" />
-          <path
-            d="M8 1A7 7 0 0 1 8 15"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-          />
-        </svg>
-      );
-    case 'success':
-      return (
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-          <circle cx="8" cy="8" r="8" fill="var(--success-color, #22c55e)" />
-          <path
-            d="M4.5 8L7 10.5L11.5 6"
-            stroke="white"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      );
-    case 'error':
-      return (
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-          <circle cx="8" cy="8" r="8" fill="var(--danger-color, #f56c6c)" />
-          <path
-            d="M5 5L11 11M11 5L5 11"
-            stroke="white"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      );
-    default:
-      return (
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-          <circle cx="8" cy="8" r="7" stroke="var(--text-tertiary, #9ca3af)" strokeWidth="2" />
-        </svg>
-      );
-  }
-}
 
 export function OpenAIEditDrawer({
   open,
@@ -806,11 +752,11 @@ export function OpenAIEditDrawer({
             return (
               <div key={index} className={styles.keyTableRow}>
                 <div className={styles.keyTableColIndex}>{index + 1}</div>
-                <div
-                  className={styles.keyTableColStatus}
-                  title={keyTestStatuses[index]?.message || ''}
-                >
-                  <StatusIcon status={keyStatus} />
+                <div className={styles.keyTableColStatus}>
+                  <OpenAIKeyTestStatusIndicator
+                    status={keyStatus as 'idle' | 'loading' | 'success' | 'error'}
+                    message={keyTestStatuses[index]?.message || ''}
+                  />
                 </div>
                 <div className={styles.keyTableColKey}>
                   <input
