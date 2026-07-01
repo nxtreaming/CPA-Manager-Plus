@@ -81,6 +81,17 @@ CPAMP has no analytics SDKs, cloud account dependency, or registration flow. By 
 
 CPA Manager Plus works with [CPA / CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI), an AI gateway that routes requests to OpenAI-compatible providers.
 
+### Installer
+
+For a guided deployment, run:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/seakee/CPA-Manager-Plus/main/bin/install-cpamp.sh
+bash install-cpamp.sh
+```
+
+The script checks your environment, lets you choose the operation language, chooses full stack or CPAMP-only install, generates minimal config, and deploys only after final confirmation. See [One-Click Installer](https://seakee.github.io/CPA-Manager-Plus/docs/en/deployment/installer.html) for all options.
+
 ### CPA + CPAMP Together
 
 If you don't have CPA running yet, this Compose file starts both:
@@ -143,6 +154,7 @@ CPAMP can also run as a CPA-hosted panel on `:8317`, or as a standalone frontend
 | Demo site | [Live demo](https://seakee.github.io/CPA-Manager-Plus/) |
 | Documentation site | [CPAMP Docs](https://seakee.github.io/CPA-Manager-Plus/docs/en/) |
 | Start here | [Getting Started](https://seakee.github.io/CPA-Manager-Plus/docs/en/guide/getting-started.html) |
+| Installer | [One-Click Installer](https://seakee.github.io/CPA-Manager-Plus/docs/en/deployment/installer.html) |
 | Runtime model | [CPA gateway runtime and CPAMP](https://seakee.github.io/CPA-Manager-Plus/docs/en/guide/runtime-model.html) |
 | Gateway configuration | [Gateway Configuration](https://seakee.github.io/CPA-Manager-Plus/docs/en/gateway/configuration.html), [Providers And Compatibility APIs](https://seakee.github.io/CPA-Manager-Plus/docs/en/gateway/providers.html), [Client Configuration](https://seakee.github.io/CPA-Manager-Plus/docs/en/gateway/clients.html) |
 | Panel manual | [Dashboard](https://seakee.github.io/CPA-Manager-Plus/docs/en/manual/dashboard.html), [Configuration](https://seakee.github.io/CPA-Manager-Plus/docs/en/manual/configuration.html), [AI Providers](https://seakee.github.io/CPA-Manager-Plus/docs/en/manual/ai-providers.html), [Monitoring](https://seakee.github.io/CPA-Manager-Plus/docs/en/manual/monitoring.html), [Plugin Management](https://seakee.github.io/CPA-Manager-Plus/docs/en/manual/plugins.html) |
