@@ -89,6 +89,13 @@ type FilterOptionValues struct {
 	HeaderTraceIDs   []string
 }
 
+type FilterSelectorValues struct {
+	Models       []string
+	APIKeyHashes []string
+	Providers    []string
+	AuthFiles    []string
+}
+
 type TimelinePoint struct {
 	BucketMS            int64
 	Model               string
@@ -819,6 +826,31 @@ func (r *repository) FilterOptionValuesWithFilter(ctx context.Context, filter An
 		HeaderErrorCodes: headerErrorCodes,
 		HeaderQuotaPlans: headerQuotaPlans,
 		HeaderTraceIDs:   headerTraceIDs,
+	}, nil
+}
+
+func (r *repository) FilterSelectorValuesWithFilter(ctx context.Context, filter AnalyticsFilter) (FilterSelectorValues, error) {
+	models, err := r.distinctFilterValues(ctx, filter, "coalesce(nullif(model, ''), '')")
+	if err != nil {
+		return FilterSelectorValues{}, err
+	}
+	apiKeyHashes, err := r.distinctFilterValues(ctx, filter, "coalesce(api_key_hash, '')")
+	if err != nil {
+		return FilterSelectorValues{}, err
+	}
+	providers, err := r.distinctFilterValues(ctx, filter, "coalesce(nullif(auth_provider_snapshot, ''), nullif(provider, ''), '')")
+	if err != nil {
+		return FilterSelectorValues{}, err
+	}
+	authFiles, err := r.distinctFilterValues(ctx, filter, "coalesce(auth_file_snapshot, '')")
+	if err != nil {
+		return FilterSelectorValues{}, err
+	}
+	return FilterSelectorValues{
+		Models:       models,
+		APIKeyHashes: apiKeyHashes,
+		Providers:    providers,
+		AuthFiles:    authFiles,
 	}, nil
 }
 
