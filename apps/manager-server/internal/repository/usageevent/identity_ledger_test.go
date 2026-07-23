@@ -83,6 +83,7 @@ func TestInsertBatchBackfillsLedgerForLegacyDuplicate(t *testing.T) {
 	repo := New(db)
 	ctx := context.Background()
 	timestampMS := int64(1_800_000_002_000)
+	originalCreatedAtMS := timestampMS - 10_000
 	event := usage.Event{
 		EventHash:   "legacy-ledger-event",
 		TimestampMS: timestampMS,
@@ -92,7 +93,7 @@ func TestInsertBatchBackfillsLedgerForLegacyDuplicate(t *testing.T) {
 	}
 	if _, err := db.Exec(`insert into usage_events (
 		event_hash, timestamp_ms, timestamp, model, created_at_ms
-	) values (?, ?, ?, ?, ?)`, event.EventHash, event.TimestampMS, event.Timestamp, event.Model, event.CreatedAtMS); err != nil {
+	) values (?, ?, ?, ?, ?)`, event.EventHash, event.TimestampMS, event.Timestamp, event.Model, originalCreatedAtMS); err != nil {
 		t.Fatalf("insert legacy raw event: %v", err)
 	}
 
@@ -103,12 +104,15 @@ func TestInsertBatchBackfillsLedgerForLegacyDuplicate(t *testing.T) {
 	if result.Inserted != 0 || result.Skipped != 1 {
 		t.Fatalf("legacy duplicate result = %#v", result)
 	}
-	var rawEventID int64
-	if err := db.QueryRow(`select raw_event_id from usage_event_identity_ledger where event_hash = ?`, event.EventHash).Scan(&rawEventID); err != nil {
+	var rawEventID, firstSeenAtMS int64
+	if err := db.QueryRow(`select raw_event_id, first_seen_at_ms from usage_event_identity_ledger where event_hash = ?`, event.EventHash).Scan(&rawEventID, &firstSeenAtMS); err != nil {
 		t.Fatalf("read legacy ledger row: %v", err)
 	}
 	if rawEventID <= 0 {
 		t.Fatalf("legacy raw event ID = %d", rawEventID)
+	}
+	if firstSeenAtMS != originalCreatedAtMS {
+		t.Fatalf("legacy first seen = %d, want %d", firstSeenAtMS, originalCreatedAtMS)
 	}
 }
 

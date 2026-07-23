@@ -99,6 +99,7 @@ func (r *repository) InsertBatch(ctx context.Context, events []model.UsageEvent)
 		raw_event_id = (select id from usage_events where event_hash = ?),
 		timestamp_ms = (select timestamp_ms from usage_events where event_hash = ?),
 		bucket_ms = (select timestamp_ms - (timestamp_ms % 3600000) from usage_events where event_hash = ?),
+		first_seen_at_ms = coalesce((select case when created_at_ms > 0 then created_at_ms end from usage_events where event_hash = ?), first_seen_at_ms),
 		updated_at_ms = ?
 	where event_hash = ?`)
 	if err != nil {
@@ -265,6 +266,7 @@ func (r *repository) InsertBatch(ctx context.Context, events []model.UsageEvent)
 		} else {
 			if _, err := attachExistingLedgerStmt.ExecContext(
 				ctx,
+				event.EventHash,
 				event.EventHash,
 				event.EventHash,
 				event.EventHash,
