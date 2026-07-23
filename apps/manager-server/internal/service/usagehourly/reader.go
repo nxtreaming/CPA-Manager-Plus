@@ -50,6 +50,11 @@ type analyticsTimelineKey struct {
 	serviceTier  string
 }
 
+type analyticsTimelineAccumulator struct {
+	point        store.TimelinePoint
+	latencySumMS int64
+}
+
 func New(store *store.Store, enabled bool, logContext ...string) *Reader {
 	contextName := defaultFallbackLogContext
 	if len(logContext) > 0 && logContext[0] != "" {
@@ -343,7 +348,7 @@ func dashboardTimelineFromRows(rows []store.UsageHourlyAggregateRow) []store.Tim
 }
 
 func analyticsTimelineFromRows(rows []store.UsageHourlyAggregateRow, granularity string, location *time.Location) []store.TimelinePoint {
-	grouped := make(map[analyticsTimelineKey]*store.TimelinePoint)
+	grouped := make(map[analyticsTimelineKey]*analyticsTimelineAccumulator)
 	for _, row := range rows {
 		point := store.TimelinePoint{
 			LongContextTokens:   row.LongContextTokens,
@@ -366,16 +371,12 @@ func analyticsTimelineFromRows(rows []store.UsageHourlyAggregateRow, granularity
 		} else {
 			point.Success = row.Calls
 		}
-		if row.LatencySamples > 0 {
-			point.AvgLatencyMS.Valid = true
-			point.AvgLatencyMS.Float64 = float64(row.LatencySumMS) / float64(row.LatencySamples)
-		}
-		addAnalyticsTimelinePoint(grouped, point)
+		addAnalyticsTimelinePoint(grouped, point, row.LatencySumMS)
 	}
 	return sortedAnalyticsTimeline(grouped)
 }
 
-func addAnalyticsTimelinePoint(grouped map[analyticsTimelineKey]*store.TimelinePoint, point store.TimelinePoint) {
+func addAnalyticsTimelinePoint(grouped map[analyticsTimelineKey]*analyticsTimelineAccumulator, point store.TimelinePoint, latencySumMS int64) {
 	mapKey := analyticsTimelineKey{
 		bucketMS:     point.BucketMS,
 		model:        point.Model,
@@ -384,37 +385,39 @@ func addAnalyticsTimelinePoint(grouped map[analyticsTimelineKey]*store.TimelineP
 	}
 	entry := grouped[mapKey]
 	if entry == nil {
-		copy := point
-		grouped[mapKey] = &copy
+		grouped[mapKey] = &analyticsTimelineAccumulator{
+			point:        point,
+			latencySumMS: latencySumMS,
+		}
 		return
 	}
-	latencyTotal := entry.AvgLatencyMS.Float64*float64(entry.LatencySamples) + point.AvgLatencyMS.Float64*float64(point.LatencySamples)
-	entry.Calls += point.Calls
-	entry.Tokens += point.Tokens
-	entry.Success += point.Success
-	entry.Failure += point.Failure
-	entry.InputTokens += point.InputTokens
-	entry.OutputTokens += point.OutputTokens
-	entry.ReasoningTokens += point.ReasoningTokens
-	entry.CachedTokens += point.CachedTokens
-	entry.CacheReadTokens += point.CacheReadTokens
-	entry.CacheCreationTokens += point.CacheCreationTokens
-	entry.LongInputTokens += point.LongInputTokens
-	entry.LongOutputTokens += point.LongOutputTokens
-	entry.LongCachedTokens += point.LongCachedTokens
-	entry.LongCacheReadTokens += point.LongCacheReadTokens
-	entry.LongCacheCreationTokens += point.LongCacheCreationTokens
-	entry.LatencySamples += point.LatencySamples
-	entry.AvgLatencyMS.Valid = entry.LatencySamples > 0
-	if entry.AvgLatencyMS.Valid {
-		entry.AvgLatencyMS.Float64 = latencyTotal / float64(entry.LatencySamples)
-	}
+	entry.point.Calls += point.Calls
+	entry.point.Tokens += point.Tokens
+	entry.point.Success += point.Success
+	entry.point.Failure += point.Failure
+	entry.point.InputTokens += point.InputTokens
+	entry.point.OutputTokens += point.OutputTokens
+	entry.point.ReasoningTokens += point.ReasoningTokens
+	entry.point.CachedTokens += point.CachedTokens
+	entry.point.CacheReadTokens += point.CacheReadTokens
+	entry.point.CacheCreationTokens += point.CacheCreationTokens
+	entry.point.LongInputTokens += point.LongInputTokens
+	entry.point.LongOutputTokens += point.LongOutputTokens
+	entry.point.LongCachedTokens += point.LongCachedTokens
+	entry.point.LongCacheReadTokens += point.LongCacheReadTokens
+	entry.point.LongCacheCreationTokens += point.LongCacheCreationTokens
+	entry.point.LatencySamples += point.LatencySamples
+	entry.latencySumMS += latencySumMS
 }
 
-func sortedAnalyticsTimeline(grouped map[analyticsTimelineKey]*store.TimelinePoint) []store.TimelinePoint {
+func sortedAnalyticsTimeline(grouped map[analyticsTimelineKey]*analyticsTimelineAccumulator) []store.TimelinePoint {
 	result := make([]store.TimelinePoint, 0, len(grouped))
-	for _, point := range grouped {
-		result = append(result, *point)
+	for _, entry := range grouped {
+		if entry.point.LatencySamples > 0 {
+			entry.point.AvgLatencyMS.Valid = true
+			entry.point.AvgLatencyMS.Float64 = float64(entry.latencySumMS) / float64(entry.point.LatencySamples)
+		}
+		result = append(result, entry.point)
 	}
 	sort.Slice(result, func(i, j int) bool {
 		if result[i].BucketMS != result[j].BucketMS {

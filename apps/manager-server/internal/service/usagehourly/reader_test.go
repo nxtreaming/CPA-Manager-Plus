@@ -221,6 +221,35 @@ func TestReaderPreservesEmptyLiteralDashAndWhitespaceModels(t *testing.T) {
 	}
 }
 
+func TestAnalyticsTimelineAccumulatesLatencyBeforeAveraging(t *testing.T) {
+	rows := []store.UsageHourlyAggregateRow{
+		{
+			BucketMS:       0,
+			Model:          "model-a",
+			BillingModel:   "model-a",
+			Calls:          1,
+			LatencySumMS:   1,
+			LatencySamples: 1,
+		},
+		{
+			BucketMS:       hourMS,
+			Model:          "model-a",
+			BillingModel:   "model-a",
+			Calls:          7,
+			LatencySumMS:   29,
+			LatencySamples: 7,
+		},
+	}
+
+	points := analyticsTimelineFromRows(rows, "day", time.UTC)
+	if len(points) != 1 {
+		t.Fatalf("timeline points = %#v, want one point", points)
+	}
+	if !points[0].AvgLatencyMS.Valid || points[0].AvgLatencyMS.Float64 != 3.75 {
+		t.Fatalf("average latency = %#v, want 3.75", points[0].AvgLatencyMS)
+	}
+}
+
 func sortTimelinePoints(points []store.TimelinePoint) {
 	sort.Slice(points, func(i, j int) bool {
 		if points[i].BucketMS != points[j].BucketMS {
