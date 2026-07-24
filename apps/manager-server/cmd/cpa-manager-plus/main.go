@@ -82,6 +82,9 @@ func runServer() {
 	defer stop()
 
 	serverApp := httpapi.New(cfg, db, manager)
+	if err := serverApp.AppContext().UsageService.StartImportSessionCleanup(ctx); err != nil {
+		log.Fatalf("start usage import session cleanup: %v", err)
+	}
 	automationSettingsService := serverApp.AppContext().AccountProcessingPolicyService
 	runtimeSettings := automationSettingsService.RuntimeSettings(ctx)
 	rateLimitAutoDisableWorker := worker.NewRateLimitAutoDisableWorker(db, collector.RuntimeConfig{
